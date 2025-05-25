@@ -112,15 +112,35 @@ def create_stock_chart(symbol: str, hist_data: pd.DataFrame, period: str):
     
     return fig
 
-def copy_to_clipboard_button(text_to_copy: str, button_text: str = "Copy Recommendation"):
-    """
-    Creates a Streamlit button that copies the provided text to the clipboard.
-    Note: This uses a simple JavaScript snippet.
-    """
-    # Escape single quotes in the text to be copied for JavaScript
-    escaped_text = text_to_copy.replace("'", "\\'")
-    st.markdown(f"""
-    <button onclick="navigator.clipboard.writeText('{escaped_text}');">
-        {button_text}
+def copy_to_clipboard_button(text_to_copy):
+    """Creates a properly styled copy button with clean text formatting"""
+    # Clean the text by removing extra formatting artifacts
+    clean_text = text_to_copy.replace('−', '-').replace('*', '').replace('$', '\\$')
+    
+    # Create a clean, readable version
+    clean_text = ' '.join(clean_text.split())  # Remove extra whitespace
+    
+    # Create the button with proper JavaScript
+    button_html = f"""
+    <button class="copy-button" onclick="
+        const textToCopy = `{clean_text}`;
+        navigator.clipboard.writeText(textToCopy).then(function() {{
+            // Change button text temporarily to show success
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '✅ Copied!';
+            btn.style.background = 'linear-gradient(135deg, #28a745 0%, #20c997 100%)';
+            setTimeout(() => {{
+                btn.innerHTML = originalText;
+                btn.style.background = 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)';
+            }}, 2000);
+        }}).catch(function(err) {{
+            console.error('Could not copy text: ', err);
+            alert('Copy failed. Please select and copy the text manually.');
+        }});
+    ">
+        📋 Copy Recommendation
     </button>
-    """, unsafe_allow_html=True)
+    """
+    
+    st.markdown(button_html, unsafe_allow_html=True)

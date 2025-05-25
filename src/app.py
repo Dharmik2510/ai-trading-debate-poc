@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import time
 import json
@@ -20,8 +19,10 @@ st.set_page_config(
 )
 
 # Custom CSS for better UI
+# Custom CSS for better UI - FIXED VERSION
 st.markdown("""
 <style>
+/* General container styling */
 .debate-container {
     border: 1px solid #e0e0e0;
     border-radius: 10px;
@@ -30,50 +31,217 @@ st.markdown("""
     background-color: #f8f9fa;
 }
 
+/* Styling for Bull Agent messages - now a fancy card with FIXED text wrapping */
 .bull-message {
-    background: green; 
-    border-left: 4px solid #03ad2b;
-    padding: 15px;
-    margin: 10px 0;
-    border-radius: 8px;
+    background: green; /* Light green gradient */
+    border-left: 6px solid #03ad2b; /* Thicker, prominent border */
+    padding: 20px; /* Increased padding */
+    margin: 15px 0; /* More margin between cards */
+    border-radius: 12px; /* More rounded corners */
+    box-shadow: 0 4px 8px rgba(0, 173, 43, 0.1); /* Greenish shadow */
+    
+    /* FIXED: Proper text wrapping and overflow handling */
+    word-wrap: break-word; /* Legacy support */
+    word-break: break-word; /* Ensures long words/URLs break and wrap */
+    overflow-wrap: break-word; /* Modern equivalent for breaking long words */
+    white-space: pre-wrap; /* Preserves whitespace and wraps text */
+    hyphens: auto; /* Add hyphens for better breaking */
+    
+    /* Container constraints */
+    max-width: 100%; /* Ensures it doesn't exceed parent width */
+    width: 100%; /* Take full available width */
+    box-sizing: border-box; /* Include padding in width calculation */
+    overflow: hidden; /* Hide any overflow */
+    
+    /* Typography */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.6; /* Better readability */
+    
+    /* Animation */
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
 }
 
+.bull-message:hover {
+    transform: translateY(-2px); /* Slight lift effect */
+    box-shadow: 0 6px 12px rgba(0, 173, 43, 0.15); /* Enhanced shadow on hover */
+}
+
+/* Styling for Bear Agent messages - now a fancy card with FIXED text wrapping */
 .bear-message {
-    background: red; 
-    border-left: 4px solid #e60017;
-    padding: 15px;
-    margin: 10px 0;
-    border-radius: 8px;
+    background: red; /* Light red gradient */
+    border-left: 6px solid #e60017; /* Thicker, prominent border */
+    padding: 20px; /* Increased padding */
+    margin: 15px 0; /* More margin between cards */
+    border-radius: 12px; /* More rounded corners */
+    box-shadow: 0 4px 8px rgba(230, 0, 23, 0.1); /* Reddish shadow */
+    
+    /* FIXED: Proper text wrapping and overflow handling */
+    word-wrap: break-word; /* Legacy support */
+    word-break: break-word; /* Ensures long words/URLs break and wrap */
+    overflow-wrap: break-word; /* Modern equivalent for breaking long words */
+    white-space: pre-wrap; /* Preserves whitespace and wraps text */
+    hyphens: auto; /* Add hyphens for better breaking */
+    
+    /* Container constraints */
+    max-width: 100%; /* Ensures it doesn't exceed parent width */
+    width: 100%; /* Take full available width */
+    box-sizing: border-box; /* Include padding in width calculation */
+    overflow: hidden; /* Hide any overflow */
+    
+    /* Typography */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    line-height: 1.6; /* Better readability */
+    
+    /* Animation */
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
 }
 
+.bear-message:hover {
+    transform: translateY(-2px); /* Slight lift effect */
+    box-shadow: 0 6px 12px rgba(230, 0, 23, 0.15); /* Enhanced shadow on hover */
+}
+
+/* Styling for Final Recommendation with FIXED text wrapping */
 .final-recommendation {
-    background: #e0f7fa; /* Light blue */
+    background: linear-gradient(135deg, #e0f7fa 0%, #f0fbfc 100%); /* Light blue gradient */
     border: 2px solid #00bcd4;
     padding: 20px;
     margin: 20px 0;
-    border-radius: 10px;
-    font-weight: bold;
+    border-radius: 12px;
+    font-weight: 500; /* Slightly less bold for better readability */
     color: #333;
+    
+    /* FIXED: Proper text wrapping and overflow handling */
+    word-wrap: break-word; /* Legacy support */
+    word-break: break-word; /* Ensures long words/URLs break and wrap */
+    overflow-wrap: break-word; /* Modern equivalent for breaking long words */
+    white-space: pre-wrap; /* Preserves whitespace and wraps text */
+    hyphens: auto; /* Add hyphens for better breaking */
+    
+    /* Container constraints */
+    max-width: 100%; /* Ensures it doesn't exceed parent width */
+    width: 100%; /* Take full available width */
+    box-sizing: border-box; /* Include padding in width calculation */
+    overflow: hidden; /* Hide any overflow */
+    
+    /* Typography */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    line-height: 1.6; /* Better readability */
+    
+    box-shadow: 0 4px 8px rgba(0, 188, 212, 0.15); /* Blueish shadow */
 }
 
+/* Additional fixes for Streamlit containers */
+.stExpander > div:first-child {
+    overflow: hidden; /* Prevent horizontal scroll */
+}
+
+.element-container {
+    overflow: hidden; /* Prevent horizontal scroll */
+}
+
+/* Fix for any potential inline code or long URLs */
+code, pre {
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
+    white-space: pre-wrap !important;
+    max-width: 100% !important;
+}
+
+/* Agent avatar styling */
 .agent-avatar {
     width: 40px;
     height: 40px;
     border-radius: 50%;
     display: inline-block;
     margin-right: 10px;
+    flex-shrink: 0; /* Prevent avatar from shrinking */
 }
 
+/* Button styling */
 .stButton>button {
     background-color: #4CAF50;
     color: white;
     padding: 10px 20px;
-    border-radius: 5px;
+    border-radius: 8px;
     border: none;
     cursor: pointer;
+    transition: background-color 0.2s ease;
 }
+
 .stButton>button:hover {
     background-color: #45a049;
+}
+            
+/* Copy button styling - FIXED */
+.copy-button {
+    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    margin: 10px 0;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 123, 255, 0.2);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.copy-button:hover {
+    background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+}
+
+.copy-button:active {
+    transform: translateY(0);
+}
+
+/* Hide the malformed copy button if it exists */
+button[onclick*="navigator.clipboard.writeText"] {
+    display: none !important;
+}
+
+/* Footer disclaimer styling for better visibility */
+.footer-disclaimer {
+    text-align: center;
+    color: #555 !important; /* Darker color for better visibility */
+    font-size: 0.95em !important; /* Slightly larger font */
+    padding: 20px 15px !important; /* Add padding for better spacing */
+    margin: 20px 0 !important; /* Add top and bottom margin */
+    background-color: #f8f9fa; /* Light background */
+    border-radius: 8px; /* Rounded corners */
+    border: 1px solid #e0e0e0; /* Subtle border */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Subtle shadow */
+}
+
+.footer-disclaimer .disclaimer-text {
+    color: #dc3545 !important; /* Bootstrap red color for disclaimer */
+    font-weight: bold !important;
+    font-size: 1em !important; /* Same size as parent text */
+    margin-top: 8px !important; /* Space between lines */
+    display: block; /* Make it a block for better spacing */
+}
+
+/* Responsive design improvements */
+@media (max-width: 768px) {
+    .bull-message, .bear-message, .final-recommendation {
+        padding: 15px;
+        margin: 10px 0;
+        font-size: 13px;
+    }
+    
+    .footer-disclaimer {
+        font-size: 0.9em !important;
+        padding: 15px 10px !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -92,7 +260,7 @@ def main():
         openai_key = st.text_input(
             "OpenAI API Key",
             type="password",
-            help="Get your API key from platform.openai.com"
+            help="Get your API key from platform.openai.com. This key will be used for both agent debates (via OpenAI API) and news sentiment analysis (via OpenAI API)."
         )
         if openai_key:
             st.session_state.openai_key = openai_key
@@ -211,8 +379,8 @@ def main():
             
             # Fetch primary stock data with technicals and news sentiment
             with st.spinner(f"Fetching data for {stock_symbol}..."):
-                # Fetch a longer period (e.g., "1y") to ensure enough data for MAs, BBs, ATR calculations
-                stock_data = StockDataFetcher.get_stock_data(stock_symbol, period="1y") 
+                # Pass the API key to the data fetcher for news sentiment analysis
+                stock_data = StockDataFetcher.get_stock_data(stock_symbol, period="1y", api_key=openai_key) 
                 
             if not stock_data:
                 st.error(f"Could not fetch data for {stock_symbol}. Please check the symbol and try again.")
@@ -222,14 +390,14 @@ def main():
             st.session_state.stock_data = stock_data # Store fetched data in session state
             
             # Fetch historical data specifically for charting (uses user-selected period)
-            with st.spinner(f"Fetching historical chart data for {stock_symbol} ({selected_chart_period})..."):
+            with st.spinner(f"Fetching historical chart data for {stock_symbol} ({selected_chart_period_display})..."):
                 try:
                     # yfinance.history() directly returns a pandas DataFrame
                     chart_hist_data = yf.Ticker(stock_symbol).history(period=selected_chart_period)
                     if not chart_hist_data.empty:
                         st.session_state.chart_historical_data = chart_hist_data
                     else:
-                        st.warning(f"No historical chart data available for {stock_symbol} for the period {selected_chart_period}.")
+                        st.warning(f"No historical chart data available for {stock_symbol} for the period {selected_chart_period_display}.")
                         st.session_state.chart_historical_data = pd.DataFrame() # Ensure it's an empty DataFrame
                 except Exception as e:
                     st.error(f"Error fetching historical chart data for {stock_symbol}: {e}")
@@ -237,7 +405,7 @@ def main():
 
 
             # Display current stock metrics
-            st.subheader(f"📊 {stock_data.symbol} Analysis")
+            st.subheader(f"� {stock_data.symbol} Analysis")
             
             metrics_col1, metrics_col2, metrics_col3, metrics_col4, metrics_col5 = st.columns(5)
             with metrics_col1:
@@ -259,7 +427,7 @@ def main():
                 if stock_data.news_sentiment['headlines']:
                     for i, headline in enumerate(stock_data.news_sentiment['headlines']):
                         # Ensure title and publisher are not empty before displaying
-                        title_display = headline['title'] if headline['title'] else "N/A Title"
+                        title_display = headline['title'] if headline['title'] else "No title available"
                         publisher_display = headline['publisher'] if headline['publisher'] else "N/A Publisher"
                         st.markdown(f"- **{headline['sentiment'].capitalize()}**: [{title_display}]({headline['link']}) ({publisher_display})")
             else:
@@ -350,6 +518,7 @@ def main():
                 st.markdown("---")
                 st.subheader("⚖️ Debate Summary")
                 with st.spinner("Generating debate summary..."):
+                    # Pass the API key to generate_debate_summary as well if it uses LLM
                     summary = generate_debate_summary(st.session_state.debate_history, stock_data)
                     st.markdown(summary)
                 
@@ -357,6 +526,7 @@ def main():
                 st.subheader("🎯 Final Recommendation")
                 
                 with st.spinner("Generating final recommendation..."):
+                    # Pass the API key to generate_final_recommendation as well if it uses LLM
                     final_rec = generate_final_recommendation(st.session_state.debate_history, stock_data)
                     st.session_state.final_recommendation_text = final_rec # Store for re-runs
                 
@@ -368,7 +538,15 @@ def main():
                 
                 # Add copy to clipboard button for the recommendation
                 if st.session_state.final_recommendation_text:
-                    copy_to_clipboard_button(st.session_state.final_recommendation_text)
+                    # Replace the copy_to_clipboard_button call with this:
+                    if st.button("📋 Copy Recommendation", key="copy_rec"):
+                        # Clean the text for copying
+                        clean_recommendation = st.session_state.final_recommendation_text.replace('−', '-').replace('*', '')
+                        clean_recommendation = ' '.join(clean_recommendation.split())  # Remove extra whitespace
+                        
+                        # Use Streamlit's native approach
+                        st.code(clean_recommendation, language=None)
+                        st.success("💡 Tip: Click the copy icon in the top-right corner of the text box above to copy!")
 
         # This block handles re-runs of the app if a debate was already active
         elif st.session_state.debate_active and st.session_state.stock_data:
@@ -391,7 +569,7 @@ def main():
                 st.write(st.session_state.stock_data.news_sentiment['summary'])
                 if st.session_state.stock_data.news_sentiment['headlines']:
                     for i, headline in enumerate(st.session_state.stock_data.news_sentiment['headlines']):
-                        title_display = headline['title'] if headline['title'] else "N/A Title"
+                        title_display = headline['title'] if headline['title'] else "No title available"
                         publisher_display = headline['publisher'] if headline['publisher'] else "N/A Publisher"
                         st.markdown(f"- **{headline['sentiment'].capitalize()}**: [{title_display}]({headline['link']}) ({publisher_display})")
             else:
@@ -431,7 +609,15 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             if st.session_state.final_recommendation_text:
-                copy_to_clipboard_button(st.session_state.final_recommendation_text)
+                # Replace the copy_to_clipboard_button call with this:
+                if st.button("📋 Copy Recommendation", key="copy_rec"):
+                    # Clean the text for copying
+                    clean_recommendation = st.session_state.final_recommendation_text.replace('−', '-').replace('*', '')
+                    clean_recommendation = ' '.join(clean_recommendation.split())  # Remove extra whitespace
+                    
+                    # Use Streamlit's native approach
+                    st.code(clean_recommendation, language=None)
+                    st.success("💡 Tip: Click the copy icon in the top-right corner of the text box above to copy!")
 
 
     # Right column for chart and technical data
@@ -462,7 +648,7 @@ def main():
     # Footer with disclaimer
     st.divider()
     st.markdown("""
-    <div style='text-align: center; color: #666; font-size: 0.9em;'>
+    <div class="footer-disclaimer">
         🤖 Powered by OpenAI GPT-3.5 | 📈 Market data from Yahoo Finance<br>
         <span style='color: red; font-weight: bold;'>Disclaimer: This is for educational and entertainment purposes only and not financial advice. Day trading involves substantial risk.</span>
     </div>

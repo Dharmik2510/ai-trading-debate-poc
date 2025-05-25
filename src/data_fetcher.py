@@ -1,9 +1,8 @@
-# data_fetcher.py
 import yfinance as yf
 import pandas as pd
 from dataclasses import dataclass
 from typing import List, Dict, Any
-from datetime import datetime
+import openai # Import OpenAI for LLM calls
 
 @dataclass
 class StockData:
@@ -30,7 +29,7 @@ class StockDataFetcher:
     Handles fetching historical stock data, technical indicator calculations, and news.
     """
     @staticmethod
-    def get_stock_data(symbol: str, period: str = "1y") -> StockData:
+    def get_stock_data(symbol: str, period: str = "1y", api_key: str = "") -> StockData:
         """
         Fetches stock data for a given symbol and calculates various technical indicators.
         Returns a StockData object or None if fetching fails.
@@ -64,8 +63,8 @@ class StockDataFetcher:
             # ATR
             atr = StockDataFetcher._calculate_atr(hist)
 
-            # Fetch news and perform basic sentiment analysis
-            news_data = StockDataFetcher.fetch_news_sentiment(symbol)
+            # Fetch news and perform LLM-based sentiment analysis using OpenAI
+            news_data = StockDataFetcher.fetch_news_sentiment(symbol, api_key=api_key)
             
             return StockData(
                 symbol=symbol.upper(),
@@ -129,9 +128,49 @@ class StockDataFetcher:
         return atr.iloc[-1] if not atr.empty else 0.0
 
     @staticmethod
-    def fetch_news_sentiment(symbol: str, limit: int = 5) -> dict:
+    def _call_openai_llm_for_sentiment(prompt: str, api_key: str) -> str:
         """
-        Fetches recent news headlines for a symbol and performs a basic sentiment analysis.
+        Makes a call to the OpenAI LLM for sentiment analysis.
+        Returns 'bullish', 'bearish', 'neutral', or 'error'.
+        """
+        if not api_key:
+            return "error" # Indicate API key is missing
+
+        try:
+            openai.api_key = api_key
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo", # Using gpt-3.5-turbo as specified for general LLM calls
+                messages=[
+                    {"role": "system", "content": "You are a highly accurate sentiment analysis AI. You will be given a news headline and must classify its sentiment as 'bullish', 'bearish', or 'neutral' regarding a stock. Respond with only one word: 'bullish', 'bearish', or 'neutral'."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10, # Keep tokens low as we expect a single word response
+                temperature=0.0 # Low temperature for consistent classification
+            )
+            text = response.choices[0].message.content.strip().lower()
+            if "bullish" in text:
+                return "bullish"
+            elif "bearish" in text:
+                return "bearish"
+            elif "neutral" in text:
+                return "neutral"
+            else:
+                print(f"LLM sentiment response ambiguous: {text}")
+                return "neutral" # Default to neutral if LLM response is ambiguous
+        except openai.error.AuthenticationError:
+            print("OpenAI Authentication Error: Invalid API key.")
+            return "error"
+        except openai.error.RateLimitError:
+            print("OpenAI Rate Limit Exceeded: Please wait and try again.")
+            return "error"
+        except Exception as e:
+            print(f"Unexpected error calling OpenAI API for sentiment: {e}")
+            return "error"
+
+    @staticmethod
+    def fetch_news_sentiment(symbol: str, limit: int = 5, api_key: str = "") -> dict:
+        """
+        Fetches recent news headlines for a symbol and performs LLM-based sentiment analysis using OpenAI.
         Returns a dictionary summarizing news sentiment.
         """
         try:
@@ -146,47 +185,63 @@ class StockDataFetcher:
             bearish_count = 0
             neutral_count = 0
 
-            # Simple keyword-based sentiment for news
-            bullish_keywords = ["gain", "rise", "grow", "positive", "strong", "beats", "upgrade", 
-                            "acquisition", "partnership", "increase", "profit", "expansion", 
-                            "record", "surge", "rally", "buy", "outperform", "success"]
-            bearish_keywords = ["drop", "fall", "lose", "negative", "weak", "misses", "downgrade", 
-                            "investigation", "lawsuit", "cut", "decline", "loss", "recession", 
-                            "slump", "plunge", "sell", "underperform", "tariff", "threat"]
-
             for item in news[:limit]:
+                # Debug: Print raw news item structure
+                print(f"Raw news item: {item}")  # Debugging line
+                
                 # Extract content from the nested structure
-                content = item.get('content', {})
+                content = item.get('content', item)  # Use entire item if no 'content' key
                 
                 # Get title - try multiple fields
                 title = content.get('title', 'No title available').strip()
-                if not title:
+                if title == 'No title available':
                     title = content.get('summary', 'No title available').split('.')[0].strip()
                 
-                # Get publisher - try multiple fields
+                # Get publisher - handle both direct strings and nested provider objects
                 publisher = 'Unknown Publisher'
-                provider = content.get('provider', {})
-                if isinstance(provider, dict):
-                    publisher = provider.get('displayName', 'Unknown Publisher')
-                elif isinstance(provider, str):
-                    publisher = provider
+                if 'publisher' in content:
+                    if isinstance(content['publisher'], str):
+                        publisher = content['publisher']
+                    elif isinstance(content['publisher'], dict):
+                        publisher = content['publisher'].get('displayName', 'Unknown Publisher')
+                elif 'provider' in content:
+                    if isinstance(content['provider'], str):
+                        publisher = content['provider']
+                    elif isinstance(content['provider'], dict):
+                        publisher = content['provider'].get('displayName', 'Unknown Publisher')
                 
                 # Get link - try multiple fields
-                link = content.get('canonicalUrl', {}).get('url', '#')
-                if link == '#':
-                    link = content.get('clickThroughUrl', {}).get('url', '#')
+                link = '#'
+                if 'link' in content and content['link']:
+                    link = content['link']
+                elif 'canonicalUrl' in content and isinstance(content['canonicalUrl'], dict):
+                    link = content['canonicalUrl'].get('url', '#')
+                elif 'url' in content:
+                    link = content['url']
                 
-                # Sentiment analysis
-                sentiment = "neutral"
-                title_lower = title.lower()
+                # Use LLM for sentiment analysis if a title is available and API key is provided
+                sentiment = "neutral"  # Default
                 
-                # Check for bullish keywords
-                if any(keyword in title_lower for keyword in bullish_keywords):
-                    sentiment = "bullish"
+                if title and title != 'No title available' and api_key:
+                    sentiment_prompt = (
+                        f"Analyze the sentiment of this financial news headline regarding stocks or the market: '{title}'. "
+                        "Is it bullish (positive for stocks), bearish (negative for stocks), or neutral? "
+                        "Respond with only one word: 'bullish', 'bearish', or 'neutral'."
+                    )
+                    print(f"Sending to LLM: {sentiment_prompt}")  # Debugging line
+                    
+                    llm_sentiment = StockDataFetcher._call_openai_llm_for_sentiment(sentiment_prompt, api_key)
+                    print(f"LLM response: {llm_sentiment}")  # Debugging line
+                    
+                    if llm_sentiment in ["bullish", "bearish", "neutral"]:
+                        sentiment = llm_sentiment
+                    else:
+                        print(f"LLM returned unexpected sentiment: {llm_sentiment}")
+                
+                # Update counts based on determined sentiment
+                if sentiment == "bullish":
                     bullish_count += 1
-                # Check for bearish keywords
-                elif any(keyword in title_lower for keyword in bearish_keywords):
-                    sentiment = "bearish"
+                elif sentiment == "bearish":
                     bearish_count += 1
                 else:
                     neutral_count += 1
@@ -202,6 +257,96 @@ class StockDataFetcher:
             summary_message = f"Analyzed {total_news} recent news articles. "
             if total_news > 0:
                 summary_message += f"Bullish: {bullish_count}, Bearish: {bearish_count}, Neutral: {neutral_count}."
+
+            return {
+                "summary": summary_message,
+                "bullish_count": bullish_count,
+                "bearish_count": bearish_count,
+                "neutral_count": neutral_count,
+                "headlines": headlines_with_sentiment
+            }
+        except Exception as e:
+            print(f"Error fetching news for {symbol}: {str(e)}")
+            return {"summary": "Could not fetch news.", "bullish_count": 0, "bearish_count": 0, "neutral_count": 0, "headlines": []}
+        """
+        Fetches recent news headlines for a symbol and performs LLM-based sentiment analysis using OpenAI.
+        Returns a dictionary summarizing news sentiment.
+        """
+        try:
+            stock = yf.Ticker(symbol)
+            news = stock.news
+            
+            if not news:
+                return {"summary": "No recent news available.", "bullish_count": 0, "bearish_count": 0, "neutral_count": 0, "headlines": []}
+
+            headlines_with_sentiment = []
+            bullish_count = 0
+            bearish_count = 0
+            neutral_count = 0
+
+            for item in news[:limit]:
+                # Extract content from the nested structure (yfinance news sometimes has 'content' dict)
+                # Prioritize 'title', then 'summary' from the main item or 'content' dict
+                title = item.get('title', '').strip()
+                if not title:
+                    title = item.get('content', {}).get('title', '').strip()
+                if not title:
+                    title = item.get('content', {}).get('summary', '').strip()
+                if not title:
+                    title = item.get('summary', '').strip() # Fallback to summary if no title
+
+                link = item.get('link', '#').strip()
+                if not link: # Try canonicalUrl or clickThroughUrl if 'link' is empty
+                    link = item.get('canonicalUrl', {}).get('url', '#').strip()
+                if not link:
+                    link = item.get('clickThroughUrl', {}).get('url', '#').strip()
+                if not link:
+                    link = '#' # Default if no link found
+
+                # Attempt to get publisher from various keys, prioritizing common ones
+                publisher = item.get('publisher', '').strip()
+                if not publisher: 
+                    publisher = item.get('providerDisplayName', '').strip()
+                if not publisher:
+                    publisher = item.get('source', '').strip() # 'source' can also be a key
+                if not publisher: # If still no publisher, set to a generic placeholder
+                    publisher = 'N/A Publisher'
+
+                # Use LLM for sentiment analysis if a title is available and API key is provided
+                sentiment = "neutral" # Default if title is empty or LLM fails
+                if title and api_key:
+                    sentiment_prompt = f"Analyze the sentiment of this news headline regarding a stock: '{title}'. Is it bullish, bearish, or neutral? Respond with only 'bullish', 'bearish', or 'neutral'."
+                    llm_sentiment = StockDataFetcher._call_openai_llm_for_sentiment(sentiment_prompt, api_key)
+                    if llm_sentiment in ["bullish", "bearish", "neutral"]:
+                        sentiment = llm_sentiment
+                    else:
+                        print(f"LLM sentiment analysis failed for title: '{title}'. LLM response: '{llm_sentiment}'. Defaulting to neutral.")
+                        sentiment = "neutral" # Fallback if LLM returns 'error' or unexpected
+                elif not api_key:
+                    print("API key not provided for LLM sentiment analysis. Defaulting to neutral for news.")
+                    sentiment = "neutral" # Default if API key is missing
+
+                # Update counts based on determined sentiment
+                if sentiment == "bullish":
+                    bullish_count += 1
+                elif sentiment == "bearish":
+                    bearish_count += 1
+                else:
+                    neutral_count += 1
+                
+                headlines_with_sentiment.append({
+                    "title": title if title else "No title available", # Store original title or fallback
+                    "publisher": publisher,
+                    "link": link,
+                    "sentiment": sentiment
+                })
+            
+            total_news = len(headlines_with_sentiment)
+            summary_message = f"Analyzed {total_news} recent news articles. "
+            if total_news > 0:
+                summary_message += f"Bullish: {bullish_count}, Bearish: {bearish_count}, Neutral: {neutral_count}."
+            else:
+                summary_message = "No recent news available to analyze."
 
             return {
                 "summary": summary_message,
