@@ -2,8 +2,25 @@ import yfinance as yf
 import pandas as pd
 from dataclasses import dataclass
 from typing import List, Dict, Any
-import openai # Import OpenAI for LLM calls
+import openai
+import requests
+from bs4 import BeautifulSoup
+import time
+import re
+from urllib.parse import urljoin, urlparse
+import praw  # Reddit API wrapper
 
+@dataclass
+class NewsItem:
+    """Represents a single news item with full content and analysis"""
+    title: str
+    publisher: str
+    link: str
+    content: str
+    sentiment: str
+    source_type: str  # 'yahoo_finance' or 'reddit'
+    score: int = 0  # For Reddit posts/comments
+    
 @dataclass
 class StockData:
     """
@@ -22,17 +39,175 @@ class StockData:
     bb_upper: float
     bb_lower: float
     atr: float
-    news_sentiment: dict = None # New field for news sentiment summary
+    news_sentiment: dict = None
+    reddit_sentiment: dict = None
+
+class NewsContentExtractor:
+    """Handles extracting and parsing news content from various sources"""
+    
+    @staticmethod
+    def extract_content_from_url(url: str, timeout: int = 10) -> str:
+        """
+        Extracts the main text content from a news article URL.
+        Returns cleaned text content or empty string if extraction fails.
+        """
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+            }
+            
+            response = requests.get(url, headers=headers, timeout=timeout)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Remove script and style elements
+            for script in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                script.decompose()
+            
+            # Try to find the main content using common article selectors
+            content_selectors = [
+                'article', 
+                '[role="main"]',
+                '.article-content',
+                '.story-content', 
+                '.entry-content',
+                '.post-content',
+                '.article-body',
+                '.story-body',
+                '.content-body',
+                'main',
+                '.main-content'
+            ]
+            
+            content = ""
+            for selector in content_selectors:
+                elements = soup.select(selector)
+                if elements:
+                    # Get text from all matching elements
+                    for element in elements:
+                        content += element.get_text(separator=' ', strip=True) + " "
+                    break
+            
+            # Fallback: get all paragraph text if no main content found
+            if not content.strip():
+                paragraphs = soup.find_all('p')
+                content = ' '.join([p.get_text(strip=True) for p in paragraphs])
+            
+            # Clean and limit content
+            content = re.sub(r'\s+', ' ', content).strip()
+            
+            # Limit content length to avoid token limits (keep first 2000 characters)
+            if len(content) > 2000:
+                content = content[:2000] + "..."
+                
+            return content
+            
+        except Exception as e:
+            print(f"Error extracting content from {url}: {str(e)}")
+            return ""
+
+class RedditNewsExtractor:
+    """Handles fetching and analyzing Reddit discussions about stocks"""
+    
+    def __init__(self, client_id: str = None, client_secret: str = None, user_agent: str = "StockDebateBot"):
+        """
+        Initialize Reddit API client. If credentials not provided, will use read-only mode.
+        """
+        self.reddit = None
+        try:
+            if client_id and client_secret:
+                self.reddit = praw.Reddit(
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    user_agent=user_agent
+                )
+            else:
+                # Use read-only mode without authentication
+                self.reddit = praw.Reddit(
+                    client_id="dummy_client_id",
+                    client_secret="dummy_secret", 
+                    user_agent=user_agent
+                )
+        except Exception as e:
+            print(f"Reddit API initialization failed: {e}")
+            self.reddit = None
+    
+    def fetch_reddit_discussions(self, symbol: str, limit: int = 10) -> List[Dict]:
+        """
+        Fetches recent Reddit discussions about a stock symbol from relevant subreddits.
+        Returns list of discussion items with content and metadata.
+        """
+        if not self.reddit:
+            return []
+            
+        discussions = []
+        
+        # Relevant subreddits for stock discussions
+        subreddits = ['stocks', 'investing', 'SecurityAnalysis', 'StockMarket', 'wallstreetbets', 'ValueInvesting']
+        
+        try:
+            for subreddit_name in subreddits[:3]:  # Limit to first 3 to avoid rate limits
+                try:
+                    subreddit = self.reddit.subreddit(subreddit_name)
+                    
+                    # Search for posts mentioning the stock symbol
+                    for submission in subreddit.search(f"${symbol} OR {symbol}", limit=limit//3):
+                        if submission.selftext or submission.title:
+                            content = f"{submission.title}\n\n{submission.selftext}"
+                            
+                            discussions.append({
+                                'title': submission.title,
+                                'content': content[:1500],  # Limit content length
+                                'score': submission.score,
+                                'subreddit': subreddit_name,
+                                'url': f"https://reddit.com{submission.permalink}",
+                                'created_utc': submission.created_utc
+                            })
+                            
+                            # Get top comments for additional context
+                            submission.comments.replace_more(limit=0)
+                            for comment in submission.comments[:3]:  # Top 3 comments
+                                if len(comment.body) > 50:  # Only meaningful comments
+                                    discussions.append({
+                                        'title': f"Comment on: {submission.title[:50]}...",
+                                        'content': comment.body[:1000],
+                                        'score': comment.score,
+                                        'subreddit': subreddit_name,
+                                        'url': f"https://reddit.com{comment.permalink}",
+                                        'created_utc': comment.created_utc
+                                    })
+                                    
+                except Exception as e:
+                    print(f"Error fetching from r/{subreddit_name}: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Error in Reddit discussions fetch: {e}")
+            
+        # Sort by score (popularity) and recency
+        discussions.sort(key=lambda x: (x['score'], x['created_utc']), reverse=True)
+        return discussions[:limit]
 
 class StockDataFetcher:
     """
-    Handles fetching historical stock data, technical indicator calculations, and news.
+    Enhanced stock data fetcher with comprehensive news analysis from multiple sources.
     """
+    
     @staticmethod
-    def get_stock_data(symbol: str, period: str = "1y", api_key: str = "") -> StockData:
+    def get_stock_data(symbol: str, period: str = "1y", api_key: str = "", reddit_credentials: dict = None) -> StockData:
         """
-        Fetches stock data for a given symbol and calculates various technical indicators.
-        Returns a StockData object or None if fetching fails.
+        Fetches comprehensive stock data including technical indicators and multi-source news analysis.
+        
+        Args:
+            symbol: Stock symbol
+            period: Historical data period
+            api_key: OpenAI API key for LLM analysis
+            reddit_credentials: Dict with 'client_id' and 'client_secret' for Reddit API
         """
         try:
             stock = yf.Ticker(symbol)
@@ -53,7 +228,7 @@ class StockDataFetcher:
             ma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
             ma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
             
-            # Simple Support and Resistance (20-period min/max)
+            # Simple Support and Resistance
             support = hist['Low'].rolling(window=20).min().iloc[-1]
             resistance = hist['High'].rolling(window=20).max().iloc[-1]
 
@@ -63,8 +238,11 @@ class StockDataFetcher:
             # ATR
             atr = StockDataFetcher._calculate_atr(hist)
 
-            # Fetch news and perform LLM-based sentiment analysis using OpenAI
-            news_data = StockDataFetcher.fetch_news_sentiment(symbol, api_key=api_key)
+            # Fetch and analyze Yahoo Finance news with full content parsing
+            news_data = StockDataFetcher.fetch_enhanced_news_sentiment(symbol, api_key=api_key)
+            
+            # Fetch and analyze Reddit discussions
+            reddit_data = StockDataFetcher.fetch_reddit_sentiment(symbol, api_key=api_key, reddit_credentials=reddit_credentials)
             
             return StockData(
                 symbol=symbol.upper(),
@@ -80,12 +258,186 @@ class StockDataFetcher:
                 bb_upper=float(bb_upper),
                 bb_lower=float(bb_lower),
                 atr=float(atr),
-                news_sentiment=news_data # Store news sentiment
+                news_sentiment=news_data,
+                reddit_sentiment=reddit_data
             )
         except Exception as e:
             print(f"Error fetching or calculating data for {symbol}: {str(e)}")
             return None
-    
+
+    @staticmethod
+    def fetch_enhanced_news_sentiment(symbol: str, limit: int = 5, api_key: str = "") -> dict:
+        """
+        Fetches Yahoo Finance news and performs deep content analysis with LLM sentiment analysis.
+        """
+        try:
+            stock = yf.Ticker(symbol)
+            news = stock.news
+            print(f"[DEBUG] yfinance news for {symbol}: {news}")  # Debug print to check news content
+            if not news:
+                return {"summary": "No recent news available.", "articles": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}, "headlines": []}
+
+            news_items = []
+            sentiment_counts = {"bullish": 0, "bearish": 0, "neutral": 0}
+            content_extractor = NewsContentExtractor()
+            headlines = []
+
+            for item in news[:limit]:
+                # Yahoo's new API structure: news item is a dict with 'content' key
+                content_data = item.get('content', {})
+                title = content_data.get('title', item.get('title', 'No title available')).strip()
+                # Try clickThroughUrl, canonicalUrl, or fallback to None
+                link = None
+                if content_data.get('clickThroughUrl', {}).get('url'):
+                    link = content_data['clickThroughUrl']['url']
+                elif content_data.get('canonicalUrl', {}).get('url'):
+                    link = content_data['canonicalUrl']['url']
+                else:
+                    link = item.get('link', '#').strip() if item.get('link') else None
+                publisher = content_data.get('provider', {}).get('displayName', item.get('publisher', 'Unknown Publisher')).strip()
+                # Skip if link is missing or invalid
+                if not link or link == '#':
+                    continue
+                headlines.append(title)
+                # Extract full article content
+                full_content = content_extractor.extract_content_from_url(link)
+                # Perform comprehensive sentiment analysis on full content
+                sentiment = "neutral"
+                if api_key and (title or full_content):
+                    analysis_text = f"Title: {title}\n\nContent: {full_content[:1500]}" if full_content else title
+                    sentiment = StockDataFetcher._analyze_comprehensive_sentiment(analysis_text, symbol, api_key)
+                sentiment_counts[sentiment] += 1
+                news_item = NewsItem(
+                    title=title,
+                    publisher=publisher,
+                    link=link,
+                    content=full_content[:500] + "..." if len(full_content) > 500 else full_content,
+                    sentiment=sentiment,
+                    source_type="yahoo_finance"
+                )
+                news_items.append({
+                    "title": news_item.title,
+                    "publisher": news_item.publisher,
+                    "link": news_item.link,
+                    "content_preview": news_item.content,
+                    "sentiment": news_item.sentiment,
+                    "source": "Yahoo Finance"
+                })
+                time.sleep(1)
+            
+            total_articles = len(news_items)
+            summary = f"Analyzed {total_articles} Yahoo Finance articles with full content. "
+            summary += f"Bullish: {sentiment_counts['bullish']}, Bearish: {sentiment_counts['bearish']}, Neutral: {sentiment_counts['neutral']}."
+
+            return {
+                "summary": summary,
+                "articles": news_items,
+                "sentiment_breakdown": sentiment_counts,
+                "total_articles": total_articles,
+                "headlines": headlines
+            }
+            
+        except Exception as e:
+            print(f"Error in enhanced news sentiment analysis for {symbol}: {str(e)}")
+            return {"summary": "Could not fetch enhanced news.", "articles": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}, "headlines": []}
+
+    @staticmethod
+    def fetch_reddit_sentiment(symbol: str, api_key: str = "", reddit_credentials: dict = None) -> dict:
+        """
+        Fetches Reddit discussions and performs sentiment analysis.
+        """
+        try:
+            # Initialize Reddit extractor
+            reddit_extractor = RedditNewsExtractor(
+                client_id='YOrBI1pTv66FlPSW29LHsQ',
+                client_secret= '83g9syJGwGR-jAQTmFgPyqD9DN39zg'
+            )
+            
+            discussions = reddit_extractor.fetch_reddit_discussions(symbol, limit=10)
+            
+            if not discussions:
+                return {"summary": "No Reddit discussions found.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
+            
+            reddit_items = []
+            sentiment_counts = {"bullish": 0, "bearish": 0, "neutral": 0}
+            
+            for discussion in discussions:
+                sentiment = "neutral"
+                if api_key:
+                    analysis_text = f"Title: {discussion['title']}\n\nContent: {discussion['content']}"
+                    sentiment = StockDataFetcher._analyze_comprehensive_sentiment(analysis_text, symbol, api_key)
+                
+                sentiment_counts[sentiment] += 1
+                
+                reddit_items.append({
+                    "title": discussion['title'],
+                    "content_preview": discussion['content'][:300] + "..." if len(discussion['content']) > 300 else discussion['content'],
+                    "score": discussion['score'],
+                    "subreddit": discussion['subreddit'],
+                    "url": discussion['url'],
+                    "sentiment": sentiment,
+                    "source": "Reddit"
+                })
+            
+            total_discussions = len(reddit_items)
+            summary = f"Analyzed {total_discussions} Reddit discussions. "
+            summary += f"Bullish: {sentiment_counts['bullish']}, Bearish: {sentiment_counts['bearish']}, Neutral: {sentiment_counts['neutral']}."
+            
+            return {
+                "summary": summary,
+                "discussions": reddit_items,
+                "sentiment_breakdown": sentiment_counts,
+                "total_discussions": total_discussions
+            }
+            
+        except Exception as e:
+            print(f"Error in Reddit sentiment analysis for {symbol}: {str(e)}")
+            return {"summary": "Could not fetch Reddit discussions.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
+
+    @staticmethod
+    def _analyze_comprehensive_sentiment(text: str, symbol: str, api_key: str) -> str:
+        """
+        Performs comprehensive sentiment analysis using OpenAI LLM with full context.
+        """
+        if not api_key:
+            return "neutral"
+        try:
+            openai.api_key = api_key
+            prompt = f"""
+            Analyze the sentiment of this financial content regarding {symbol} stock:
+
+            {text}
+
+            Consider:
+            1. Overall tone towards the stock/company
+            2. Mention of financial metrics, growth, or performance
+            3. Market outlook and future prospects
+            4. Risk factors or concerns mentioned
+            5. Recommendations or predictions
+
+            Classify the sentiment as:
+            - "bullish" if the content is positive/optimistic about the stock
+            - "bearish" if the content is negative/pessimistic about the stock  
+            - "neutral" if the content is balanced or doesn't express clear direction
+
+            Respond with only one word: bullish, bearish, or neutral.
+            """
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert financial sentiment analyst. Analyze the given content and classify sentiment accurately."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.1
+            )
+            sentiment = response.choices[0].message.content.strip().lower()
+            return sentiment if sentiment in ["bullish", "bearish", "neutral"] else "neutral"
+        except Exception as e:
+            print(f"Error in comprehensive sentiment analysis: {e}")
+            return "neutral"
+
+    # Keep existing technical indicator methods
     @staticmethod
     def _calculate_rsi(prices, period=14):
         """Calculates the Relative Strength Index (RSI)."""
@@ -94,14 +446,14 @@ class StockDataFetcher:
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
         
         rs = gain / loss
-        rs = rs.replace([float('inf'), -float('inf')], 0) # Replace inf with 0 to avoid NaN in RSI calculation
+        rs = rs.replace([float('inf'), -float('inf')], 0)
         
         rsi = 100 - (100 / (1 + rs))
         return rsi.iloc[-1] if not rsi.empty else 0.0
     
     @staticmethod
     def _calculate_macd(prices, span_fast=12, span_slow=26, span_signal=9):
-        """Calculates the Moving Average Convergence Divergence (MACD)."""
+        """Calculates MACD."""
         ema_fast = prices.ewm(span=span_fast, adjust=False).mean()
         ema_slow = prices.ewm(span=span_slow, adjust=False).mean()
         macd_line = ema_fast - ema_slow
@@ -109,7 +461,7 @@ class StockDataFetcher:
 
     @staticmethod
     def _calculate_bollinger_bands(prices, window=20, num_std_dev=2):
-        """Calculates Bollinger Bands (Upper and Lower)."""
+        """Calculates Bollinger Bands."""
         rolling_mean = prices.rolling(window=window).mean()
         rolling_std = prices.rolling(window=window).std()
         upper_band = rolling_mean + (rolling_std * num_std_dev)
@@ -119,242 +471,10 @@ class StockDataFetcher:
 
     @staticmethod
     def _calculate_atr(df, window=14):
-        """Calculates Average True Range (ATR)."""
+        """Calculates Average True Range."""
         high_low = df['High'] - df['Low']
         high_close = abs(df['High'] - df['Close'].shift())
         low_close = abs(df['Low'] - df['Close'].shift())
         tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
         atr = tr.rolling(window=window).mean()
         return atr.iloc[-1] if not atr.empty else 0.0
-
-    @staticmethod
-    def _call_openai_llm_for_sentiment(prompt: str, api_key: str) -> str:
-        """
-        Makes a call to the OpenAI LLM for sentiment analysis.
-        Returns 'bullish', 'bearish', 'neutral', or 'error'.
-        """
-        if not api_key:
-            return "error" # Indicate API key is missing
-
-        try:
-            openai.api_key = api_key
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo", # Using gpt-3.5-turbo as specified for general LLM calls
-                messages=[
-                    {"role": "system", "content": "You are a highly accurate sentiment analysis AI. You will be given a news headline and must classify its sentiment as 'bullish', 'bearish', or 'neutral' regarding a stock. Respond with only one word: 'bullish', 'bearish', or 'neutral'."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=10, # Keep tokens low as we expect a single word response
-                temperature=0.0 # Low temperature for consistent classification
-            )
-            text = response.choices[0].message.content.strip().lower()
-            if "bullish" in text:
-                return "bullish"
-            elif "bearish" in text:
-                return "bearish"
-            elif "neutral" in text:
-                return "neutral"
-            else:
-                print(f"LLM sentiment response ambiguous: {text}")
-                return "neutral" # Default to neutral if LLM response is ambiguous
-        except openai.error.AuthenticationError:
-            print("OpenAI Authentication Error: Invalid API key.")
-            return "error"
-        except openai.error.RateLimitError:
-            print("OpenAI Rate Limit Exceeded: Please wait and try again.")
-            return "error"
-        except Exception as e:
-            print(f"Unexpected error calling OpenAI API for sentiment: {e}")
-            return "error"
-
-    @staticmethod
-    def fetch_news_sentiment(symbol: str, limit: int = 5, api_key: str = "") -> dict:
-        """
-        Fetches recent news headlines for a symbol and performs LLM-based sentiment analysis using OpenAI.
-        Returns a dictionary summarizing news sentiment.
-        """
-        try:
-            stock = yf.Ticker(symbol)
-            news = stock.news
-            
-            if not news:
-                return {"summary": "No recent news available.", "bullish_count": 0, "bearish_count": 0, "neutral_count": 0, "headlines": []}
-
-            headlines_with_sentiment = []
-            bullish_count = 0
-            bearish_count = 0
-            neutral_count = 0
-
-            for item in news[:limit]:
-                # Debug: Print raw news item structure
-                print(f"Raw news item: {item}")  # Debugging line
-                
-                # Extract content from the nested structure
-                content = item.get('content', item)  # Use entire item if no 'content' key
-                
-                # Get title - try multiple fields
-                title = content.get('title', 'No title available').strip()
-                if title == 'No title available':
-                    title = content.get('summary', 'No title available').split('.')[0].strip()
-                
-                # Get publisher - handle both direct strings and nested provider objects
-                publisher = 'Unknown Publisher'
-                if 'publisher' in content:
-                    if isinstance(content['publisher'], str):
-                        publisher = content['publisher']
-                    elif isinstance(content['publisher'], dict):
-                        publisher = content['publisher'].get('displayName', 'Unknown Publisher')
-                elif 'provider' in content:
-                    if isinstance(content['provider'], str):
-                        publisher = content['provider']
-                    elif isinstance(content['provider'], dict):
-                        publisher = content['provider'].get('displayName', 'Unknown Publisher')
-                
-                # Get link - try multiple fields
-                link = '#'
-                if 'link' in content and content['link']:
-                    link = content['link']
-                elif 'canonicalUrl' in content and isinstance(content['canonicalUrl'], dict):
-                    link = content['canonicalUrl'].get('url', '#')
-                elif 'url' in content:
-                    link = content['url']
-                
-                # Use LLM for sentiment analysis if a title is available and API key is provided
-                sentiment = "neutral"  # Default
-                
-                if title and title != 'No title available' and api_key:
-                    sentiment_prompt = (
-                        f"Analyze the sentiment of this financial news headline regarding stocks or the market: '{title}'. "
-                        "Is it bullish (positive for stocks), bearish (negative for stocks), or neutral? "
-                        "Respond with only one word: 'bullish', 'bearish', or 'neutral'."
-                    )
-                    print(f"Sending to LLM: {sentiment_prompt}")  # Debugging line
-                    
-                    llm_sentiment = StockDataFetcher._call_openai_llm_for_sentiment(sentiment_prompt, api_key)
-                    print(f"LLM response: {llm_sentiment}")  # Debugging line
-                    
-                    if llm_sentiment in ["bullish", "bearish", "neutral"]:
-                        sentiment = llm_sentiment
-                    else:
-                        print(f"LLM returned unexpected sentiment: {llm_sentiment}")
-                
-                # Update counts based on determined sentiment
-                if sentiment == "bullish":
-                    bullish_count += 1
-                elif sentiment == "bearish":
-                    bearish_count += 1
-                else:
-                    neutral_count += 1
-                
-                headlines_with_sentiment.append({
-                    "title": title,
-                    "publisher": publisher,
-                    "link": link,
-                    "sentiment": sentiment
-                })
-            
-            total_news = len(headlines_with_sentiment)
-            summary_message = f"Analyzed {total_news} recent news articles. "
-            if total_news > 0:
-                summary_message += f"Bullish: {bullish_count}, Bearish: {bearish_count}, Neutral: {neutral_count}."
-
-            return {
-                "summary": summary_message,
-                "bullish_count": bullish_count,
-                "bearish_count": bearish_count,
-                "neutral_count": neutral_count,
-                "headlines": headlines_with_sentiment
-            }
-        except Exception as e:
-            print(f"Error fetching news for {symbol}: {str(e)}")
-            return {"summary": "Could not fetch news.", "bullish_count": 0, "bearish_count": 0, "neutral_count": 0, "headlines": []}
-        """
-        Fetches recent news headlines for a symbol and performs LLM-based sentiment analysis using OpenAI.
-        Returns a dictionary summarizing news sentiment.
-        """
-        try:
-            stock = yf.Ticker(symbol)
-            news = stock.news
-            
-            if not news:
-                return {"summary": "No recent news available.", "bullish_count": 0, "bearish_count": 0, "neutral_count": 0, "headlines": []}
-
-            headlines_with_sentiment = []
-            bullish_count = 0
-            bearish_count = 0
-            neutral_count = 0
-
-            for item in news[:limit]:
-                # Extract content from the nested structure (yfinance news sometimes has 'content' dict)
-                # Prioritize 'title', then 'summary' from the main item or 'content' dict
-                title = item.get('title', '').strip()
-                if not title:
-                    title = item.get('content', {}).get('title', '').strip()
-                if not title:
-                    title = item.get('content', {}).get('summary', '').strip()
-                if not title:
-                    title = item.get('summary', '').strip() # Fallback to summary if no title
-
-                link = item.get('link', '#').strip()
-                if not link: # Try canonicalUrl or clickThroughUrl if 'link' is empty
-                    link = item.get('canonicalUrl', {}).get('url', '#').strip()
-                if not link:
-                    link = item.get('clickThroughUrl', {}).get('url', '#').strip()
-                if not link:
-                    link = '#' # Default if no link found
-
-                # Attempt to get publisher from various keys, prioritizing common ones
-                publisher = item.get('publisher', '').strip()
-                if not publisher: 
-                    publisher = item.get('providerDisplayName', '').strip()
-                if not publisher:
-                    publisher = item.get('source', '').strip() # 'source' can also be a key
-                if not publisher: # If still no publisher, set to a generic placeholder
-                    publisher = 'N/A Publisher'
-
-                # Use LLM for sentiment analysis if a title is available and API key is provided
-                sentiment = "neutral" # Default if title is empty or LLM fails
-                if title and api_key:
-                    sentiment_prompt = f"Analyze the sentiment of this news headline regarding a stock: '{title}'. Is it bullish, bearish, or neutral? Respond with only 'bullish', 'bearish', or 'neutral'."
-                    llm_sentiment = StockDataFetcher._call_openai_llm_for_sentiment(sentiment_prompt, api_key)
-                    if llm_sentiment in ["bullish", "bearish", "neutral"]:
-                        sentiment = llm_sentiment
-                    else:
-                        print(f"LLM sentiment analysis failed for title: '{title}'. LLM response: '{llm_sentiment}'. Defaulting to neutral.")
-                        sentiment = "neutral" # Fallback if LLM returns 'error' or unexpected
-                elif not api_key:
-                    print("API key not provided for LLM sentiment analysis. Defaulting to neutral for news.")
-                    sentiment = "neutral" # Default if API key is missing
-
-                # Update counts based on determined sentiment
-                if sentiment == "bullish":
-                    bullish_count += 1
-                elif sentiment == "bearish":
-                    bearish_count += 1
-                else:
-                    neutral_count += 1
-                
-                headlines_with_sentiment.append({
-                    "title": title if title else "No title available", # Store original title or fallback
-                    "publisher": publisher,
-                    "link": link,
-                    "sentiment": sentiment
-                })
-            
-            total_news = len(headlines_with_sentiment)
-            summary_message = f"Analyzed {total_news} recent news articles. "
-            if total_news > 0:
-                summary_message += f"Bullish: {bullish_count}, Bearish: {bearish_count}, Neutral: {neutral_count}."
-            else:
-                summary_message = "No recent news available to analyze."
-
-            return {
-                "summary": summary_message,
-                "bullish_count": bullish_count,
-                "bearish_count": bearish_count,
-                "neutral_count": neutral_count,
-                "headlines": headlines_with_sentiment
-            }
-        except Exception as e:
-            print(f"Error fetching news for {symbol}: {str(e)}")
-            return {"summary": "Could not fetch news.", "bullish_count": 0, "bearish_count": 0, "neutral_count": 0, "headlines": []}

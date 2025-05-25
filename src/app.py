@@ -426,10 +426,21 @@ def main():
                 st.write(stock_data.news_sentiment['summary'])
                 if stock_data.news_sentiment['headlines']:
                     for i, headline in enumerate(stock_data.news_sentiment['headlines']):
-                        # Ensure title and publisher are not empty before displaying
-                        title_display = headline['title'] if headline['title'] else "No title available"
-                        publisher_display = headline['publisher'] if headline['publisher'] else "N/A Publisher"
-                        st.markdown(f"- **{headline['sentiment'].capitalize()}**: [{title_display}]({headline['link']}) ({publisher_display})")
+                        # If headline is a dict, get 'title' and 'publisher'; if string, use as is
+                        if isinstance(headline, dict):
+                            title_display = headline.get('title', 'No title available')
+                            publisher_display = headline.get('publisher', 'N/A Publisher')
+                            sentiment_display = headline.get('sentiment', 'Neutral').capitalize()
+                            link_display = headline.get('link', None)
+                        else:
+                            title_display = headline if headline else 'No title available'
+                            publisher_display = 'N/A Publisher'
+                            sentiment_display = 'Neutral'
+                            link_display = None
+                        if link_display:
+                            st.markdown(f"- **{sentiment_display}**: [{title_display}]({link_display}) ({publisher_display})")
+                        else:
+                            st.markdown(f"- **{sentiment_display}**: {title_display} ({publisher_display})")
             else:
                 st.write("No news sentiment data available.")
 
@@ -569,9 +580,21 @@ def main():
                 st.write(st.session_state.stock_data.news_sentiment['summary'])
                 if st.session_state.stock_data.news_sentiment['headlines']:
                     for i, headline in enumerate(st.session_state.stock_data.news_sentiment['headlines']):
-                        title_display = headline['title'] if headline['title'] else "No title available"
-                        publisher_display = headline['publisher'] if headline['publisher'] else "N/A Publisher"
-                        st.markdown(f"- **{headline['sentiment'].capitalize()}**: [{title_display}]({headline['link']}) ({publisher_display})")
+                        # If headline is a dict, get 'title' and 'publisher'; if string, use as is
+                        if isinstance(headline, dict):
+                            title_display = headline.get('title', 'No title available')
+                            publisher_display = headline.get('publisher', 'N/A Publisher')
+                            sentiment_display = headline.get('sentiment', 'Neutral').capitalize()
+                            link_display = headline.get('link', None)
+                        else:
+                            title_display = headline if headline else 'No title available'
+                            publisher_display = 'N/A Publisher'
+                            sentiment_display = 'Neutral'
+                            link_display = None
+                        if link_display:
+                            st.markdown(f"- **{sentiment_display}**: [{title_display}]({link_display}) ({publisher_display})")
+                        else:
+                            st.markdown(f"- **{sentiment_display}**: {title_display} ({publisher_display})")
             else:
                 st.write("No news sentiment data available.")
 

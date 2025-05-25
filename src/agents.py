@@ -17,8 +17,8 @@ class AgentPersonality:
 
 class TradingAgent:
     """
-    Represents an AI trading agent (Bull or Bear) with a specific personality
-    and methods for analysis and debate.
+    Enhanced AI trading agent that analyzes technical data, Yahoo Finance news content, 
+    and Reddit discussions to provide comprehensive trading insights.
     """
     def __init__(self, name: str, role: str, avatar: str, color: str, personality: AgentPersonality):
         self.name = name
@@ -26,15 +26,15 @@ class TradingAgent:
         self.avatar = avatar
         self.color = color
         self.personality = personality
-        self.conversation_memory = [] # Stores past interactions for potential future use
+        self.conversation_memory = []
 
     def get_system_prompt(self) -> str:
         """
-        Generates the system prompt for the OpenAI LLM, defining the agent's persona.
+        Enhanced system prompt that includes multi-source analysis capabilities.
         """
         focus_areas_str = ", ".join(self.personality.focus_areas)
         return f"""
-        You are {self.name}, an expert day trader with a {self.role} perspective.
+        You are {self.name}, an expert day trader and market analyst with a {self.role} perspective.
         
         Your personality:
         - Risk tolerance: {self.personality.risk_tolerance}
@@ -42,65 +42,95 @@ class TradingAgent:
         - Trading style: {self.personality.style}
         - Key beliefs: {self.personality.beliefs}
         
-        Rules for debate:
-        1. Stay in character - maintain your {self.role} perspective.
-        2. Use specific data points, technical indicators, and recent news sentiment to support arguments.
-        3. Address opponent's points directly and professionally.
-        4. Provide actionable trading insights (e.g., potential entry/exit points, risks).
-        5. Keep responses concise (2-3 paragraphs max).
+        Your analysis capabilities:
+        1. Technical Analysis: RSI, MACD, Moving Averages, Bollinger Bands, Support/Resistance, ATR
+        2. News Analysis: Full article content from Yahoo Finance with sentiment analysis
+        3. Social Sentiment: Reddit discussions from investing communities
+        4. Market Context: Integration of all data sources for comprehensive insights
         
-        Always structure responses with:
-        - Key point/counterpoint
-        - Supporting evidence from data/news
-        - Specific trading action/insight (if applicable)
+        Rules for debate:
+        1. Stay in character - maintain your {self.role} perspective consistently
+        2. Use specific data points from technical indicators, news content, and social sentiment
+        3. Reference actual news headlines and Reddit discussions when making arguments
+        4. Address opponent's points directly with counter-evidence
+        5. Provide actionable trading insights with entry/exit points and risk management
+        6. Keep responses focused and professional (2-3 paragraphs max)
+        7. Distinguish between different types of evidence (technical vs. fundamental vs. sentiment)
+        
+        Response structure:
+        - Lead with your key argument from your perspective
+        - Support with specific evidence from technical, news, or social data
+        - Provide actionable trading insight or risk assessment
+        - Counter opponent's argument if applicable
         """
     
-    def _infer_sentiment(self, text: str) -> str:
+    def _format_news_context(self, stock_data: StockData) -> str:
         """
-        Infers the sentiment (bullish, bearish, neutral) of a given text based on keywords.
-        This is a simple rule-based sentiment analysis.
+        Formats news and Reddit data into a comprehensive context string.
         """
-        text_lower = text.lower()
-        bullish_keywords = ["buy", "long", "breakout", "momentum", "strong", "bullish", "opportunity", "upside", "growth", "support holds", "uptrend", "positive", "increase", "gain"]
-        bearish_keywords = ["sell", "short", "bearish", "risk", "overbought", "warning", "downside", "resistance holds", "downtrend", "consolidation", "negative", "decrease", "drop"]
+        context_parts = []
         
-        if any(keyword in text_lower for keyword in bullish_keywords):
-            return "bullish"
-        elif any(keyword in text_lower for keyword in bearish_keywords):
-            return "bearish"
-        else:
-            return "neutral"
+        # Yahoo Finance News
+        if stock_data.news_sentiment and stock_data.news_sentiment.get('articles'):
+            context_parts.append("=== YAHOO FINANCE NEWS ===")
+            context_parts.append(stock_data.news_sentiment['summary'])
+            
+            for i, article in enumerate(stock_data.news_sentiment['articles'][:3], 1):
+                context_parts.append(f"\nArticle {i}: '{article['title']}' ({article['sentiment'].upper()})")
+                context_parts.append(f"Publisher: {article['publisher']}")
+                if article.get('content_preview'):
+                    context_parts.append(f"Content: {article['content_preview'][:200]}...")
+        
+        # Reddit Discussions
+        if stock_data.reddit_sentiment and stock_data.reddit_sentiment.get('discussions'):
+            context_parts.append("\n=== REDDIT DISCUSSIONS ===")
+            context_parts.append(stock_data.reddit_sentiment['summary'])
+            
+            for i, discussion in enumerate(stock_data.reddit_sentiment['discussions'][:3], 1):
+                context_parts.append(f"\nDiscussion {i}: '{discussion['title']}' ({discussion['sentiment'].upper()})")
+                context_parts.append(f"From r/{discussion['subreddit']} | Score: {discussion['score']}")
+                if discussion.get('content_preview'):
+                    context_parts.append(f"Content: {discussion['content_preview'][:150]}...")
+        
+        return "\n".join(context_parts) if context_parts else "No comprehensive news/social data available."
 
     def analyze(self, stock_data: StockData, context: str = "") -> tuple[str, str]:
         """
-        Generates an initial analysis of the stock from the agent's perspective.
-        Returns the analysis text and its inferred sentiment.
+        Enhanced analysis incorporating technical data, news content, and Reddit discussions.
         """
-        news_context = ""
-        if stock_data.news_sentiment and stock_data.news_sentiment['summary'] != "No recent news available.":
-            news_context = f"Recent News: {stock_data.news_sentiment['summary']}. Top headlines: " + \
-                           "; ".join([f"'{h['title']}' ({h['sentiment']})" for h in stock_data.news_sentiment['headlines'][:2]]) + "."
-
+        # Format comprehensive news and social context
+        news_social_context = self._format_news_context(stock_data)
+        
+        # Calculate additional technical insights
+        ma_signal = "above" if stock_data.price > stock_data.ma_20 else "below"
+        rsi_condition = "overbought" if stock_data.rsi > 70 else "oversold" if stock_data.rsi < 30 else "neutral"
+        bb_position = "upper band" if stock_data.price > stock_data.bb_upper else "lower band" if stock_data.price < stock_data.bb_lower else "middle range"
+        
         prompt = f"""
-        Analyze {stock_data.symbol} for day trading from your {self.role} perspective.
+        Provide a comprehensive day trading analysis for {stock_data.symbol} from your {self.role} perspective.
         
-        Current Data:
-        - Price: ${stock_data.price:.2f} ({stock_data.change_pct:+.2f}%)
-        - Volume: {stock_data.volume:,}
-        - RSI: {stock_data.rsi:.1f}
+        TECHNICAL DATA:
+        - Current Price: ${stock_data.price:.2f} ({stock_data.change_pct:+.2f}%)
+        - Price vs 20-day MA: {ma_signal} (${stock_data.ma_20:.2f})
+        - RSI: {stock_data.rsi:.1f} ({rsi_condition})
         - MACD: {stock_data.macd:.3f}
-        - 20-day MA: ${stock_data.ma_20:.2f}
-        - 50-day MA: ${stock_data.ma_50:.2f}
-        - Support: ${stock_data.support:.2f}
-        - Resistance: ${stock_data.resistance:.2f}
-        - Bollinger Bands: Upper: ${stock_data.bb_upper:.2f}, Lower: ${stock_data.bb_lower:.2f}
-        - ATR: {stock_data.atr:.2f}
+        - Bollinger Bands: Price near {bb_position} (Upper: ${stock_data.bb_upper:.2f}, Lower: ${stock_data.bb_lower:.2f})
+        - Support/Resistance: ${stock_data.support:.2f} / ${stock_data.resistance:.2f}
+        - ATR (Volatility): {stock_data.atr:.2f}
+        - Volume: {stock_data.volume:,}
         
-        {news_context}
+        NEWS & SOCIAL SENTIMENT:
+        {news_social_context}
         
-        Context: {context}
+        Additional Context: {context}
         
-        Given this data, should we day trade {stock_data.symbol} today? Give your {self.role} analysis and rationale.
+        Analyze this data from your {self.role} perspective and provide:
+        1. Your overall stance on day trading {stock_data.symbol} today
+        2. Key supporting evidence from technical indicators
+        3. How news sentiment and Reddit discussions support/contradict your view
+        4. Specific entry/exit levels and risk management if recommending a trade
+        
+        Remember: You are {self.role}, so interpret ambiguous signals through that lens while being objective about the data.
         """
         
         response_text = self._call_llm(prompt)
@@ -109,30 +139,33 @@ class TradingAgent:
     
     def respond_to(self, opponent_name: str, opponent_message: str, stock_data: StockData) -> tuple[str, str]:
         """
-        Generates a counter-argument to the opponent's message, maintaining the agent's perspective.
-        Returns the response text and its inferred sentiment.
+        Enhanced counter-argument incorporating all available data sources.
         """
-        news_context = ""
-        if stock_data.news_sentiment and stock_data.news_sentiment['summary'] != "No recent news available.":
-            news_context = f"Recent News: {stock_data.news_sentiment['summary']}. Top headlines: " + \
-                           "; ".join([f"'{h['title']}' ({h['sentiment']})" for h in stock_data.news_sentiment['headlines'][:2]]) + "."
-
+        news_social_context = self._format_news_context(stock_data)
+        
         prompt = f"""
-        {opponent_name} just said:
+        {opponent_name} just argued:
         "{opponent_message}"
         
         Counter their argument about {stock_data.symbol} while staying true to your {self.role} perspective.
         
-        Current market data for reference:
+        CURRENT MARKET DATA:
         - Price: ${stock_data.price:.2f} ({stock_data.change_pct:+.2f}%)
-        - RSI: {stock_data.rsi:.1f} | MACD: {stock_data.macd:.3f}
-        - Support/Resistance: ${stock_data.support:.2f}/${stock_data.resistance:.2f}
-        - Bollinger Bands: Upper: ${stock_data.bb_upper:.2f}, Lower: ${stock_data.bb_lower:.2f}
-        - ATR: {stock_data.atr:.2f}
+        - Technical: RSI {stock_data.rsi:.1f} | MACD {stock_data.macd:.3f} | ATR {stock_data.atr:.2f}
+        - Key Levels: Support ${stock_data.support:.2f} | Resistance ${stock_data.resistance:.2f}
+        - Bollinger Bands: ${stock_data.bb_lower:.2f} - ${stock_data.bb_upper:.2f}
         
-        {news_context}
-
-        Address their specific points but provide your alternative interpretation using data and news.
+        NEWS & SOCIAL SENTIMENT:
+        {news_social_context}
+        
+        Your response should:
+        1. Directly address their specific points with counter-evidence
+        2. Use technical data, news content, or Reddit sentiment to support your view
+        3. Highlight data points they may have overlooked or misinterpreted
+        4. Maintain your {self.role} perspective while being factual
+        5. Provide specific trading insights that contradict their recommendation
+        
+        Stay professional but be persuasive with your counter-argument.
         """
         
         response_text = self._call_llm(prompt)
@@ -147,6 +180,35 @@ class TradingAgent:
         
         return response_text, sentiment
     
+    def _infer_sentiment(self, text: str) -> str:
+        """
+        Enhanced sentiment inference with more comprehensive keyword analysis.
+        """
+        text_lower = text.lower()
+        
+        bullish_keywords = [
+            "buy", "long", "breakout", "momentum", "strong", "bullish", "opportunity", 
+            "upside", "growth", "support holds", "uptrend", "positive", "increase", 
+            "gain", "rally", "bounce", "accumulate", "oversold bounce", "reversal up"
+        ]
+        
+        bearish_keywords = [
+            "sell", "short", "bearish", "risk", "overbought", "warning", "downside", 
+            "resistance holds", "downtrend", "consolidation", "negative", "decrease", 
+            "drop", "decline", "correction", "pullback", "distribution", "weakness"
+        ]
+        
+        bullish_score = sum(1 for keyword in bullish_keywords if keyword in text_lower)
+        bearish_score = sum(1 for keyword in bearish_keywords if keyword in text_lower)
+        
+        if bullish_score > bearish_score:
+            return "bullish"
+        elif bearish_score > bullish_score:
+            return "bearish"
+        else:
+            return "neutral"
+
+    
     def _call_llm(self, prompt: str) -> str:
         """
         Makes a call to the OpenAI LLM with the given prompt.
@@ -154,15 +216,11 @@ class TradingAgent:
         """
         try:
             # Assuming openai_key is set globally via Streamlit session state in app.py
-            # and accessible here, or passed as an argument.
-            # For modularity, it's better to pass it, but for simplicity
-            # we'll assume Streamlit's session_state global access for now.
             import streamlit as st # Only import here if not globally available
             if not st.session_state.get('openai_key'):
                 return "⚠️ OpenAI API key required. Please add it in the sidebar."
-            
             openai.api_key = st.session_state.openai_key
-            
+            prompt = prompt.strip()
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -172,12 +230,17 @@ class TradingAgent:
                 max_tokens=400,
                 temperature=0.7
             )
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            if content:
+                return content.strip()
+            else:
+                return "Error: No response from OpenAI."
         except AuthenticationError:
             return "Error: Invalid OpenAI API key. Please check your key in the sidebar."
         except RateLimitError:
             return "Error: OpenAI API rate limit exceeded. Please wait a moment and try again."
         except Exception as e:
+            print(f"Error communicating with OpenAI: {e}")
             return f"Error communicating with OpenAI: {str(e)}"
 
 def create_agents(bull_personality: AgentPersonality, bear_personality: AgentPersonality):
