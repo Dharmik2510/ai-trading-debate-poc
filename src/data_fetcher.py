@@ -121,20 +121,19 @@ class RedditNewsExtractor:
         self.reddit = None
         try:
             if client_id and client_secret:
+                print(f"[DEBUG] Initializing Reddit with credentials: {client_id[:8]}...")
                 self.reddit = praw.Reddit(
                     client_id=client_id,
                     client_secret=client_secret,
                     user_agent=user_agent
                 )
+                # Test the connection
+                print(f"[DEBUG] Reddit connection test - read_only: {self.reddit.read_only}")
             else:
-                # Use read-only mode without authentication
-                self.reddit = praw.Reddit(
-                    client_id="dummy_client_id",
-                    client_secret="dummy_secret", 
-                    user_agent=user_agent
-                )
+                print("[DEBUG] No Reddit credentials provided, skipping Reddit analysis")
+                self.reddit = None
         except Exception as e:
-            print(f"Reddit API initialization failed: {e}")
+            print(f"[ERROR] Reddit API initialization failed: {e}")
             self.reddit = None
     
     def fetch_reddit_discussions(self, symbol: str, limit: int = 10) -> List[Dict]:
@@ -143,20 +142,28 @@ class RedditNewsExtractor:
         Returns list of discussion items with content and metadata.
         """
         if not self.reddit:
+            print("[DEBUG] Reddit client not available, returning empty discussions")
             return []
             
         discussions = []
         
         # Relevant subreddits for stock discussions
-        subreddits = ['stocks', 'investing', 'SecurityAnalysis', 'StockMarket', 'wallstreetbets', 'ValueInvesting']
+        subreddits = ['stocks', 'investing', 'SecurityAnalysis', 'StockMarket', 'wallstreetbets']
         
         try:
             for subreddit_name in subreddits[:3]:  # Limit to first 3 to avoid rate limits
                 try:
+                    print(f"[DEBUG] Searching r/{subreddit_name} for {symbol}")
                     subreddit = self.reddit.subreddit(subreddit_name)
                     
                     # Search for posts mentioning the stock symbol
-                    for submission in subreddit.search(f"${symbol} OR {symbol}", limit=limit//3):
+                    search_query = f"${symbol} OR {symbol}"
+                    print(f"[DEBUG] Search query: {search_query}")
+                    
+                    search_results = list(subreddit.search(search_query, limit=5, time_filter='week'))
+                    print(f"[DEBUG] Found {len(search_results)} results in r/{subreddit_name}")
+                    
+                    for submission in search_results:
                         if submission.selftext or submission.title:
                             content = f"{submission.title}\n\n{submission.selftext}"
                             
@@ -170,28 +177,34 @@ class RedditNewsExtractor:
                             })
                             
                             # Get top comments for additional context
-                            submission.comments.replace_more(limit=0)
-                            for comment in submission.comments[:3]:  # Top 3 comments
-                                if len(comment.body) > 50:  # Only meaningful comments
-                                    discussions.append({
-                                        'title': f"Comment on: {submission.title[:50]}...",
-                                        'content': comment.body[:1000],
-                                        'score': comment.score,
-                                        'subreddit': subreddit_name,
-                                        'url': f"https://reddit.com{comment.permalink}",
-                                        'created_utc': comment.created_utc
-                                    })
+                            try:
+                                submission.comments.replace_more(limit=0)
+                                for comment in submission.comments[:2]:  # Top 2 comments
+                                    if hasattr(comment, 'body') and len(comment.body) > 50:  # Only meaningful comments
+                                        discussions.append({
+                                            'title': f"Comment on: {submission.title[:50]}...",
+                                            'content': comment.body[:1000],
+                                            'score': comment.score,
+                                            'subreddit': subreddit_name,
+                                            'url': f"https://reddit.com{comment.permalink}",
+                                            'created_utc': comment.created_utc
+                                        })
+                            except Exception as comment_error:
+                                print(f"[DEBUG] Error processing comments: {comment_error}")
+                                continue
                                     
                 except Exception as e:
-                    print(f"Error fetching from r/{subreddit_name}: {e}")
+                    print(f"[ERROR] Error fetching from r/{subreddit_name}: {e}")
                     continue
                     
         except Exception as e:
-            print(f"Error in Reddit discussions fetch: {e}")
+            print(f"[ERROR] Error in Reddit discussions fetch: {e}")
             
         # Sort by score (popularity) and recency
         discussions.sort(key=lambda x: (x['score'], x['created_utc']), reverse=True)
-        return discussions[:limit]
+        final_discussions = discussions[:limit]
+        print(f"[DEBUG] Returning {len(final_discussions)} total discussions")
+        return final_discussions
 
 class StockDataFetcher:
     """
@@ -273,7 +286,8 @@ class StockDataFetcher:
         try:
             stock = yf.Ticker(symbol)
             news = stock.news
-            print(f"[DEBUG] yfinance news for {symbol}: {news}")  # Debug print to check news content
+            print(f"[DEBUG] yfinance news for {symbol}: Found {len(news) if news else 0} articles")
+            
             if not news:
                 return {"summary": "No recent news available.", "articles": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}, "headlines": []}
 
@@ -286,6 +300,7 @@ class StockDataFetcher:
                 # Yahoo's new API structure: news item is a dict with 'content' key
                 content_data = item.get('content', {})
                 title = content_data.get('title', item.get('title', 'No title available')).strip()
+                
                 # Try clickThroughUrl, canonicalUrl, or fallback to None
                 link = None
                 if content_data.get('clickThroughUrl', {}).get('url'):
@@ -294,19 +309,33 @@ class StockDataFetcher:
                     link = content_data['canonicalUrl']['url']
                 else:
                     link = item.get('link', '#').strip() if item.get('link') else None
+                
                 publisher = content_data.get('provider', {}).get('displayName', item.get('publisher', 'Unknown Publisher')).strip()
+                
                 # Skip if link is missing or invalid
                 if not link or link == '#':
                     continue
-                headlines.append(title)
+                    
+                headlines.append({
+                    'title': title,
+                    'publisher': publisher,
+                    'link': link,
+                    'sentiment': 'neutral'  # Will be updated below
+                })
+                
                 # Extract full article content
                 full_content = content_extractor.extract_content_from_url(link)
+                
                 # Perform comprehensive sentiment analysis on full content
                 sentiment = "neutral"
                 if api_key and (title or full_content):
                     analysis_text = f"Title: {title}\n\nContent: {full_content[:1500]}" if full_content else title
                     sentiment = StockDataFetcher._analyze_comprehensive_sentiment(analysis_text, symbol, api_key)
+                
+                # Update headline sentiment
+                headlines[-1]['sentiment'] = sentiment
                 sentiment_counts[sentiment] += 1
+                
                 news_item = NewsItem(
                     title=title,
                     publisher=publisher,
@@ -315,6 +344,7 @@ class StockDataFetcher:
                     sentiment=sentiment,
                     source_type="yahoo_finance"
                 )
+                
                 news_items.append({
                     "title": news_item.title,
                     "publisher": news_item.publisher,
@@ -323,7 +353,8 @@ class StockDataFetcher:
                     "sentiment": news_item.sentiment,
                     "source": "Yahoo Finance"
                 })
-                time.sleep(1)
+                
+                time.sleep(1)  # Rate limiting
             
             total_articles = len(news_items)
             summary = f"Analyzed {total_articles} Yahoo Finance articles with full content. "
@@ -347,6 +378,9 @@ class StockDataFetcher:
         Fetches Reddit discussions and performs sentiment analysis.
         """
         try:
+            print(f"[DEBUG] Starting Reddit sentiment analysis for {symbol}")
+            print(f"[DEBUG] Reddit credentials provided: {reddit_credentials is not None}")
+            
             # Initialize Reddit extractor with provided credentials
             client_id = None
             client_secret = None
@@ -354,6 +388,7 @@ class StockDataFetcher:
             if reddit_credentials:
                 client_id = reddit_credentials.get('client_id')
                 client_secret = reddit_credentials.get('client_secret')
+                print(f"[DEBUG] Using provided credentials: {client_id[:8] if client_id else 'None'}...")
             
             reddit_extractor = RedditNewsExtractor(
                 client_id=client_id,
@@ -361,6 +396,7 @@ class StockDataFetcher:
             )
             
             discussions = reddit_extractor.fetch_reddit_discussions(symbol, limit=10)
+            print(f"[DEBUG] Fetched {len(discussions)} Reddit discussions")
             
             if not discussions:
                 return {"summary": "No Reddit discussions found.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
@@ -390,55 +426,7 @@ class StockDataFetcher:
             summary = f"Analyzed {total_discussions} Reddit discussions. "
             summary += f"Bullish: {sentiment_counts['bullish']}, Bearish: {sentiment_counts['bearish']}, Neutral: {sentiment_counts['neutral']}."
             
-            return {
-                "summary": summary,
-                "discussions": reddit_items,
-                "sentiment_breakdown": sentiment_counts,
-                "total_discussions": total_discussions
-            }
-            
-        except Exception as e:
-            print(f"Error in Reddit sentiment analysis for {symbol}: {str(e)}")
-            return {"summary": "Could not fetch Reddit discussions.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
-        """
-        Fetches Reddit discussions and performs sentiment analysis.
-        """
-        try:
-            # Initialize Reddit extractor
-            reddit_extractor = RedditNewsExtractor(
-                client_id='YOrBI1pTv66FlPSW29LHsQ',
-                client_secret= '83g9syJGwGR-jAQTmFgPyqD9DN39zg'
-            )
-            
-            discussions = reddit_extractor.fetch_reddit_discussions(symbol, limit=10)
-            
-            if not discussions:
-                return {"summary": "No Reddit discussions found.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
-            
-            reddit_items = []
-            sentiment_counts = {"bullish": 0, "bearish": 0, "neutral": 0}
-            
-            for discussion in discussions:
-                sentiment = "neutral"
-                if api_key:
-                    analysis_text = f"Title: {discussion['title']}\n\nContent: {discussion['content']}"
-                    sentiment = StockDataFetcher._analyze_comprehensive_sentiment(analysis_text, symbol, api_key)
-                
-                sentiment_counts[sentiment] += 1
-                
-                reddit_items.append({
-                    "title": discussion['title'],
-                    "content_preview": discussion['content'][:300] + "..." if len(discussion['content']) > 300 else discussion['content'],
-                    "score": discussion['score'],
-                    "subreddit": discussion['subreddit'],
-                    "url": discussion['url'],
-                    "sentiment": sentiment,
-                    "source": "Reddit"
-                })
-            
-            total_discussions = len(reddit_items)
-            summary = f"Analyzed {total_discussions} Reddit discussions. "
-            summary += f"Bullish: {sentiment_counts['bullish']}, Bearish: {sentiment_counts['bearish']}, Neutral: {sentiment_counts['neutral']}."
+            print(f"[DEBUG] Reddit sentiment analysis complete: {summary}")
             
             return {
                 "summary": summary,
@@ -448,8 +436,8 @@ class StockDataFetcher:
             }
             
         except Exception as e:
-            print(f"Error in Reddit sentiment analysis for {symbol}: {str(e)}")
-            return {"summary": "Could not fetch Reddit discussions.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
+            print(f"[ERROR] Error in Reddit sentiment analysis for {symbol}: {str(e)}")
+            return {"summary": f"Could not fetch Reddit discussions: {str(e)}", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
 
     @staticmethod
     def _analyze_comprehensive_sentiment(text: str, symbol: str, api_key: str) -> str:
