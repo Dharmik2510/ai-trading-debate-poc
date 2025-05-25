@@ -347,6 +347,63 @@ class StockDataFetcher:
         Fetches Reddit discussions and performs sentiment analysis.
         """
         try:
+            # Initialize Reddit extractor with provided credentials
+            client_id = None
+            client_secret = None
+            
+            if reddit_credentials:
+                client_id = reddit_credentials.get('client_id')
+                client_secret = reddit_credentials.get('client_secret')
+            
+            reddit_extractor = RedditNewsExtractor(
+                client_id=client_id,
+                client_secret=client_secret
+            )
+            
+            discussions = reddit_extractor.fetch_reddit_discussions(symbol, limit=10)
+            
+            if not discussions:
+                return {"summary": "No Reddit discussions found.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
+            
+            reddit_items = []
+            sentiment_counts = {"bullish": 0, "bearish": 0, "neutral": 0}
+            
+            for discussion in discussions:
+                sentiment = "neutral"
+                if api_key:
+                    analysis_text = f"Title: {discussion['title']}\n\nContent: {discussion['content']}"
+                    sentiment = StockDataFetcher._analyze_comprehensive_sentiment(analysis_text, symbol, api_key)
+                
+                sentiment_counts[sentiment] += 1
+                
+                reddit_items.append({
+                    "title": discussion['title'],
+                    "content_preview": discussion['content'][:300] + "..." if len(discussion['content']) > 300 else discussion['content'],
+                    "score": discussion['score'],
+                    "subreddit": discussion['subreddit'],
+                    "url": discussion['url'],
+                    "sentiment": sentiment,
+                    "source": "Reddit"
+                })
+            
+            total_discussions = len(reddit_items)
+            summary = f"Analyzed {total_discussions} Reddit discussions. "
+            summary += f"Bullish: {sentiment_counts['bullish']}, Bearish: {sentiment_counts['bearish']}, Neutral: {sentiment_counts['neutral']}."
+            
+            return {
+                "summary": summary,
+                "discussions": reddit_items,
+                "sentiment_breakdown": sentiment_counts,
+                "total_discussions": total_discussions
+            }
+            
+        except Exception as e:
+            print(f"Error in Reddit sentiment analysis for {symbol}: {str(e)}")
+            return {"summary": "Could not fetch Reddit discussions.", "discussions": [], "sentiment_breakdown": {"bullish": 0, "bearish": 0, "neutral": 0}}
+        """
+        Fetches Reddit discussions and performs sentiment analysis.
+        """
+        try:
             # Initialize Reddit extractor
             reddit_extractor = RedditNewsExtractor(
                 client_id='YOrBI1pTv66FlPSW29LHsQ',

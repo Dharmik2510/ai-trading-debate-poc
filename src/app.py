@@ -269,6 +269,32 @@ def main():
             st.warning("Please enter your OpenAI API key to start the debate.")
         
         st.divider()
+
+         # Reddit API Configuration (Optional)
+        st.subheader("🤖 Reddit Analysis (Optional)")
+        st.markdown("*Leave blank to skip Reddit analysis*")
+        
+        reddit_client_id = st.text_input(
+            "Reddit Client ID",
+            type="password",
+            help="Get Reddit API credentials from https://www.reddit.com/prefs/apps"
+        )
+        
+        reddit_client_secret = st.text_input(
+            "Reddit Client Secret", 
+            type="password",
+            help="Your Reddit API client secret"
+        )
+        
+        if reddit_client_id and reddit_client_secret:
+            st.session_state.reddit_credentials = {
+                'client_id': reddit_client_id,
+                'client_secret': reddit_client_secret
+            }
+            st.success("Reddit API configured!")
+        else:
+            st.session_state.reddit_credentials = None
+            st.info("Reddit analysis will be skipped without API credentials")
         
         # Stock symbol input
         stock_symbol = st.text_input(
@@ -379,8 +405,14 @@ def main():
             
             # Fetch primary stock data with technicals and news sentiment
             with st.spinner(f"Fetching data for {stock_symbol}..."):
-                # Pass the API key to the data fetcher for news sentiment analysis
-                stock_data = StockDataFetcher.get_stock_data(stock_symbol, period="1y", api_key=openai_key) 
+                # Pass both API key and Reddit credentials to the data fetcher
+                reddit_creds = getattr(st.session_state, 'reddit_credentials', None)
+                stock_data = StockDataFetcher.get_stock_data(
+                    stock_symbol, 
+                    period="1y", 
+                    api_key=openai_key,
+                    reddit_credentials=reddit_creds
+                )
                 
             if not stock_data:
                 st.error(f"Could not fetch data for {stock_symbol}. Please check the symbol and try again.")
@@ -420,6 +452,9 @@ def main():
                 st.metric("Resistance", f"${stock_data.resistance:.2f}")
 
             # Display news sentiment
+            # Add this section after the Yahoo Finance news sentiment display in your app.py
+
+            # Display news sentiment
             st.markdown("---")
             st.subheader("📰 Recent News Sentiment")
             if stock_data.news_sentiment and stock_data.news_sentiment['summary']:
@@ -443,6 +478,39 @@ def main():
                             st.markdown(f"- **{sentiment_display}**: {title_display} ({publisher_display})")
             else:
                 st.write("No news sentiment data available.")
+
+            # ADD THIS NEW SECTION FOR REDDIT ANALYSIS
+            st.markdown("---")
+            st.subheader("🤖 Reddit Community Sentiment")
+            if stock_data.reddit_sentiment and stock_data.reddit_sentiment['summary']:
+                st.write(stock_data.reddit_sentiment['summary'])
+                
+                # Display sentiment breakdown
+                sentiment_breakdown = stock_data.reddit_sentiment.get('sentiment_breakdown', {})
+                if sentiment_breakdown:
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("🟢 Bullish", sentiment_breakdown.get('bullish', 0))
+                    with col2:
+                        st.metric("🔴 Bearish", sentiment_breakdown.get('bearish', 0))
+                    with col3:
+                        st.metric("⚪ Neutral", sentiment_breakdown.get('neutral', 0))
+                
+                # Display top discussions
+                discussions = stock_data.reddit_sentiment.get('discussions', [])
+                if discussions:
+                    st.write("**Top Reddit Discussions:**")
+                    for i, discussion in enumerate(discussions[:5]):  # Show top 5
+                        sentiment_emoji = "🟢" if discussion['sentiment'] == 'bullish' else "🔴" if discussion['sentiment'] == 'bearish' else "⚪"
+                        
+                        with st.expander(f"{sentiment_emoji} r/{discussion['subreddit']} - {discussion['title'][:60]}..." if len(discussion['title']) > 60 else f"{sentiment_emoji} r/{discussion['subreddit']} - {discussion['title']}"):
+                            st.write(f"**Score:** {discussion['score']} upvotes")
+                            st.write(f"**Sentiment:** {discussion['sentiment'].capitalize()}")
+                            st.write(f"**Preview:** {discussion['content_preview']}")
+                            if discussion.get('url'):
+                                st.markdown(f"[View on Reddit]({discussion['url']})")
+            else:
+                st.write("No Reddit sentiment data available.")
 
             st.markdown("---") # Visual separator
 
@@ -576,10 +644,10 @@ def main():
             
             st.markdown("---")
             st.subheader("📰 Recent News Sentiment")
-            if st.session_state.stock_data.news_sentiment and st.session_state.stock_data.news_sentiment['summary']:
-                st.write(st.session_state.stock_data.news_sentiment['summary'])
-                if st.session_state.stock_data.news_sentiment['headlines']:
-                    for i, headline in enumerate(st.session_state.stock_data.news_sentiment['headlines']):
+            if stock_data.news_sentiment and stock_data.news_sentiment['summary']:
+                st.write(stock_data.news_sentiment['summary'])
+                if stock_data.news_sentiment['headlines']:
+                    for i, headline in enumerate(stock_data.news_sentiment['headlines']):
                         # If headline is a dict, get 'title' and 'publisher'; if string, use as is
                         if isinstance(headline, dict):
                             title_display = headline.get('title', 'No title available')
@@ -598,7 +666,40 @@ def main():
             else:
                 st.write("No news sentiment data available.")
 
+            # ADD THIS NEW SECTION FOR REDDIT ANALYSIS
             st.markdown("---")
+            st.subheader("🤖 Reddit Community Sentiment")
+            if stock_data.reddit_sentiment and stock_data.reddit_sentiment['summary']:
+                st.write(stock_data.reddit_sentiment['summary'])
+                
+                # Display sentiment breakdown
+                sentiment_breakdown = stock_data.reddit_sentiment.get('sentiment_breakdown', {})
+                if sentiment_breakdown:
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("🟢 Bullish", sentiment_breakdown.get('bullish', 0))
+                    with col2:
+                        st.metric("🔴 Bearish", sentiment_breakdown.get('bearish', 0))
+                    with col3:
+                        st.metric("⚪ Neutral", sentiment_breakdown.get('neutral', 0))
+                
+                # Display top discussions
+                discussions = stock_data.reddit_sentiment.get('discussions', [])
+                if discussions:
+                    st.write("**Top Reddit Discussions:**")
+                    for i, discussion in enumerate(discussions[:5]):  # Show top 5
+                        sentiment_emoji = "🟢" if discussion['sentiment'] == 'bullish' else "🔴" if discussion['sentiment'] == 'bearish' else "⚪"
+                        
+                        with st.expander(f"{sentiment_emoji} r/{discussion['subreddit']} - {discussion['title'][:60]}..." if len(discussion['title']) > 60 else f"{sentiment_emoji} r/{discussion['subreddit']} - {discussion['title']}"):
+                            st.write(f"**Score:** {discussion['score']} upvotes")
+                            st.write(f"**Sentiment:** {discussion['sentiment'].capitalize()}")
+                            st.write(f"**Preview:** {discussion['content_preview']}")
+                            if discussion.get('url'):
+                                st.markdown(f"[View on Reddit]({discussion['url']})")
+            else:
+                st.write("No Reddit sentiment data available.")
+
+            st.markdown("---") # Visual separator
             st.subheader("🥊 Live Debate")
             st.progress(1.0) # Show full progress if debate is already concluded from a previous run
             
