@@ -161,6 +161,7 @@ class RedditNewsExtractor:
                     print(f"[DEBUG] Search query: {search_query}")
                     
                     search_results = list(subreddit.search(search_query, limit=5, time_filter='week'))
+                    print(f"[DEBUG] Search results: {search_results}")
                     print(f"[DEBUG] Found {len(search_results)} results in r/{subreddit_name}")
                     
                     for submission in search_results:

@@ -8,7 +8,7 @@ import pandas as pd # Keep pandas here for DataFrame operations
 from data_fetcher import StockData, StockDataFetcher
 from agents import TradingAgent, AgentPersonality, create_agents
 from llm_utils import generate_debate_summary, generate_final_recommendation
-from ui_utils import display_message, create_stock_chart, copy_to_clipboard_button
+from ui_utils import display_message, copy_to_clipboard_button
 
 # Page config
 st.set_page_config(
@@ -743,32 +743,6 @@ def main():
                     st.code(clean_recommendation, language=None)
                     st.success("💡 Tip: Click the copy icon in the top-right corner of the text box above to copy!")
 
-
-    # Right column for chart and technical data
-    with col2:
-        if st.session_state.stock_data and st.session_state.chart_historical_data is not None:
-            st.subheader("📈 Chart")
-            
-            # Pass the selected chart period and historical data to the chart function
-            chart = create_stock_chart(st.session_state.stock_data.symbol, st.session_state.chart_historical_data, selected_chart_period)
-            if chart:
-                st.plotly_chart(chart, use_container_width=True)
-            else:
-                st.info(f"Chart could not be generated for {st.session_state.stock_data.symbol} for the selected period ({selected_chart_period_display}). Please try a different period.")
-            
-            # Technical indicators display
-            st.subheader("📊 Technical Data")
-            st.json({
-                "RSI": round(st.session_state.stock_data.rsi, 2),
-                "MACD": round(st.session_state.stock_data.macd, 4),
-                "20-day MA": round(st.session_state.stock_data.ma_20, 2),
-                "50-day MA": round(st.session_state.stock_data.ma_50, 2),
-                "Bollinger Upper": round(st.session_state.stock_data.bb_upper, 2),
-                "Bollinger Lower": round(st.session_state.stock_data.bb_lower, 2),
-                "ATR": round(st.session_state.stock_data.atr, 2),
-                "Volume": f"{st.session_state.stock_data.volume:,}"
-            })
-    
     # Footer with disclaimer
     st.divider()
     st.markdown("""
