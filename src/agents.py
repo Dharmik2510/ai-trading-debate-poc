@@ -20,12 +20,13 @@ class TradingAgent:
     Enhanced AI trading agent that analyzes technical data, Yahoo Finance news content, 
     and Reddit discussions to provide comprehensive trading insights.
     """
-    def __init__(self, name: str, role: str, avatar: str, color: str, personality: AgentPersonality):
+    def __init__(self, name: str, role: str, avatar: str, color: str, personality: AgentPersonality, openai_key: str = ""):
         self.name = name
         self.role = role
         self.avatar = avatar
         self.color = color
         self.personality = personality
+        self.openai_key = openai_key
         self.conversation_memory = []
 
     def get_system_prompt(self) -> str:
@@ -210,16 +211,11 @@ class TradingAgent:
 
     
     def _call_llm(self, prompt: str) -> str:
-        """
-        Makes a call to the OpenAI LLM with the given prompt.
-        Includes error handling for API issues.
-        """
+        """Makes a call to the OpenAI LLM with the given prompt. Includes error handling for API issues."""
         try:
-            # Assuming openai_key is set globally via Streamlit session state in app.py
-            import streamlit as st # Only import here if not globally available
-            if not st.session_state.get('openai_key'):
-                return "⚠️ OpenAI API key required. Please add it in the sidebar."
-            client = openai.OpenAI(api_key=st.session_state.openai_key)
+            if not self.openai_key:
+                return "⚠️ OpenAI API key required."
+            client = openai.OpenAI(api_key=self.openai_key)
             prompt = prompt.strip()
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -236,21 +232,22 @@ class TradingAgent:
             else:
                 return "Error: No response from OpenAI."
         except AuthenticationError:
-            return "Error: Invalid OpenAI API key. Please check your key in the sidebar."
+            return "Error: Invalid OpenAI API key."
         except RateLimitError:
             return "Error: OpenAI API rate limit exceeded. Please wait a moment and try again."
         except Exception as e:
             print(f"Error communicating with OpenAI: {e}")
             return f"Error communicating with OpenAI: {str(e)}"
 
-def create_agents(bull_personality: AgentPersonality, bear_personality: AgentPersonality):
+def create_agents(bull_personality: AgentPersonality, bear_personality: AgentPersonality, openai_key: str = ""):
     """Initializes and returns the Bull and Bear trading agents with custom personalities."""
     bull_agent = TradingAgent(
         name="Agent Bull 🐂",
         role="bullish",
         avatar="🐂",
         color="#03ad2b",
-        personality=bull_personality
+        personality=bull_personality,
+        openai_key=openai_key
     )
     
     bear_agent = TradingAgent(
@@ -258,7 +255,8 @@ def create_agents(bull_personality: AgentPersonality, bear_personality: AgentPer
         role="bearish", 
         avatar="🐻",
         color="#e60017",
-        personality=bear_personality
+        personality=bear_personality,
+        openai_key=openai_key
     )
     
     return bull_agent, bear_agent
