@@ -17,8 +17,19 @@
 
 ## Architecture
 
+### Agent Orchestration Diagram
+
+![Architecture Diagram](docs/architecture.png)
+
+> Full details — including sequence diagrams and per-agent descriptions — are in **[docs/architecture.md](docs/architecture.md)**.
+
+### Project Structure
+
 ```
 ai-trading-debate-poc/
+├── docs/
+│   ├── architecture.png    # Agent orchestration diagram (PNG)
+│   └── architecture.md     # Full architecture documentation with Mermaid diagrams
 ├── src/                    # Python Backend (FastAPI)
 │   ├── api.py              # FastAPI application with SSE streaming
 │   ├── agents.py           # TradingAgent class and personalities
