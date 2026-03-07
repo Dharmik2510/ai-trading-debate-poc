@@ -1,6 +1,6 @@
 # agents.py
 import openai
-from openai.error import AuthenticationError, RateLimitError
+from openai import AuthenticationError, RateLimitError
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
@@ -219,9 +219,9 @@ class TradingAgent:
             import streamlit as st # Only import here if not globally available
             if not st.session_state.get('openai_key'):
                 return "⚠️ OpenAI API key required. Please add it in the sidebar."
-            openai.api_key = st.session_state.openai_key
+            client = openai.OpenAI(api_key=st.session_state.openai_key)
             prompt = prompt.strip()
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": self.get_system_prompt()},

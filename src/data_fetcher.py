@@ -448,7 +448,7 @@ class StockDataFetcher:
         if not api_key:
             return "neutral"
         try:
-            openai.api_key = api_key
+            client = openai.OpenAI(api_key=api_key)
             prompt = f"""
             Analyze the sentiment of this financial content regarding {symbol} stock:
 
@@ -468,7 +468,7 @@ class StockDataFetcher:
 
             Respond with only one word: bullish, bearish, or neutral.
             """
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are an expert financial sentiment analyst. Analyze the given content and classify sentiment accurately."},

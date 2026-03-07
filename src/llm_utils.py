@@ -1,6 +1,6 @@
 # llm_utils.py
 import openai
-from openai.error import AuthenticationError, RateLimitError
+from openai import AuthenticationError, RateLimitError
 import streamlit as st # Assuming streamlit is available for accessing session_state.openai_key
 from typing import List, Dict, Any
 
@@ -14,10 +14,9 @@ def _call_openai_llm(messages: List[Dict], model: str = "gpt-3.5-turbo", max_tok
     try:
         if not st.session_state.get('openai_key'):
             return "⚠️ OpenAI API key required. Please add it in the sidebar."
+        client = openai.OpenAI(api_key=st.session_state.openai_key)
         
-        openai.api_key = st.session_state.openai_key
-        
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=model,
             messages=messages,
             max_tokens=max_tokens,

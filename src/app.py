@@ -9,6 +9,8 @@ from data_fetcher import StockData, StockDataFetcher
 from agents import TradingAgent, AgentPersonality, create_agents
 from llm_utils import generate_debate_summary, generate_final_recommendation
 from ui_utils import display_message, copy_to_clipboard_button
+from crewai import Crew, Task
+import crew_agentic_workflow
 
 # Page config
 st.set_page_config(
@@ -22,227 +24,213 @@ st.set_page_config(
 # Custom CSS for better UI - FIXED VERSION
 st.markdown("""
 <style>
-/* General container styling */
-.debate-container {
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
-    padding: 15px;
-    margin: 10px 0;
-    background-color: #f8f9fa;
+/* Base UI Settings */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+html, body, [class*="css"]  {
+    font-family: 'Outfit', sans-serif;
 }
 
-/* Styling for Bull Agent messages - now a fancy card with FIXED text wrapping */
+/* Glassmorphism General Container */
+.debate-container {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 24px;
+    margin: 15px 0;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+/* Base Message Card Settings */
+.base-message {
+    padding: 24px;
+    margin: 20px 0;
+    border-radius: 16px;
+    word-wrap: break-word;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    box-sizing: border-box;
+    width: 100%;
+    font-size: 15px;
+    line-height: 1.7;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    color: #f1f1f1; /* Assumes Dark Mode preference for trading apps */
+}
+
+/* Hover Animation for Cards */
+.base-message:hover {
+    transform: translateY(-5px) scale(1.01);
+}
+
+/* Bull Message Theme (Neon Green/Teal Glass) */
 .bull-message {
-    background: green; /* Light green gradient */
-    border-left: 6px solid #03ad2b; /* Thicker, prominent border */
-    padding: 20px; /* Increased padding */
-    margin: 15px 0; /* More margin between cards */
-    border-radius: 12px; /* More rounded corners */
-    box-shadow: 0 4px 8px rgba(0, 173, 43, 0.1); /* Greenish shadow */
-    
-    /* FIXED: Proper text wrapping and overflow handling */
-    word-wrap: break-word; /* Legacy support */
-    word-break: break-word; /* Ensures long words/URLs break and wrap */
-    overflow-wrap: break-word; /* Modern equivalent for breaking long words */
-    white-space: pre-wrap; /* Preserves whitespace and wraps text */
-    hyphens: auto; /* Add hyphens for better breaking */
-    
-    /* Container constraints */
-    max-width: 100%; /* Ensures it doesn't exceed parent width */
-    width: 100%; /* Take full available width */
-    box-sizing: border-box; /* Include padding in width calculation */
-    overflow: hidden; /* Hide any overflow */
-    
-    /* Typography */
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 14px;
-    line-height: 1.6; /* Better readability */
-    
-    /* Animation */
-    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    background: linear-gradient(135deg, rgba(3, 173, 43, 0.15) 0%, rgba(0, 150, 136, 0.05) 100%);
+    border-left: 4px solid #00E676;
+    border-right: 1px solid rgba(0, 230, 118, 0.2);
+    border-top: 1px solid rgba(0, 230, 118, 0.2);
+    border-bottom: 1px solid rgba(0, 230, 118, 0.2);
+    box-shadow: 0 10px 30px rgba(0, 230, 118, 0.1), inset 0 0 20px rgba(0, 230, 118, 0.05);
 }
 
 .bull-message:hover {
-    transform: translateY(-2px); /* Slight lift effect */
-    box-shadow: 0 6px 12px rgba(0, 173, 43, 0.15); /* Enhanced shadow on hover */
+    box-shadow: 0 15px 35px rgba(0, 230, 118, 0.2), inset 0 0 20px rgba(0, 230, 118, 0.1);
 }
 
-/* Styling for Bear Agent messages - now a fancy card with FIXED text wrapping */
+/* Bear Message Theme (Neon Red/Orange Glass) */
 .bear-message {
-    background: red; /* Light red gradient */
-    border-left: 6px solid #e60017; /* Thicker, prominent border */
-    padding: 20px; /* Increased padding */
-    margin: 15px 0; /* More margin between cards */
-    border-radius: 12px; /* More rounded corners */
-    box-shadow: 0 4px 8px rgba(230, 0, 23, 0.1); /* Reddish shadow */
-    
-    /* FIXED: Proper text wrapping and overflow handling */
-    word-wrap: break-word; /* Legacy support */
-    word-break: break-word; /* Ensures long words/URLs break and wrap */
-    overflow-wrap: break-word; /* Modern equivalent for breaking long words */
-    white-space: pre-wrap; /* Preserves whitespace and wraps text */
-    hyphens: auto; /* Add hyphens for better breaking */
-    
-    /* Container constraints */
-    max-width: 100%; /* Ensures it doesn't exceed parent width */
-    width: 100%; /* Take full available width */
-    box-sizing: border-box; /* Include padding in width calculation */
-    overflow: hidden; /* Hide any overflow */
-    
-    /* Typography */
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 14px;
-    line-height: 1.6; /* Better readability */
-    
-    /* Animation */
-    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    background: linear-gradient(135deg, rgba(230, 0, 23, 0.15) 0%, rgba(255, 87, 34, 0.05) 100%);
+    border-left: 4px solid #FF1744;
+    border-right: 1px solid rgba(255, 23, 68, 0.2);
+    border-top: 1px solid rgba(255, 23, 68, 0.2);
+    border-bottom: 1px solid rgba(255, 23, 68, 0.2);
+    box-shadow: 0 10px 30px rgba(255, 23, 68, 0.1), inset 0 0 20px rgba(255, 23, 68, 0.05);
 }
 
 .bear-message:hover {
-    transform: translateY(-2px); /* Slight lift effect */
-    box-shadow: 0 6px 12px rgba(230, 0, 23, 0.15); /* Enhanced shadow on hover */
+    box-shadow: 0 15px 35px rgba(255, 23, 68, 0.2), inset 0 0 20px rgba(255, 23, 68, 0.1);
 }
 
-/* Styling for Final Recommendation with FIXED text wrapping */
+/* Final Recommendation Theme (Gold/Purple Premium Glass) */
 .final-recommendation {
-    background: linear-gradient(135deg, #e0f7fa 0%, #f0fbfc 100%); /* Light blue gradient */
-    border: 2px solid #00bcd4;
-    padding: 20px;
-    margin: 20px 0;
-    border-radius: 12px;
-    font-weight: 500; /* Slightly less bold for better readability */
-    color: #333;
-    
-    /* FIXED: Proper text wrapping and overflow handling */
-    word-wrap: break-word; /* Legacy support */
-    word-break: break-word; /* Ensures long words/URLs break and wrap */
-    overflow-wrap: break-word; /* Modern equivalent for breaking long words */
-    white-space: pre-wrap; /* Preserves whitespace and wraps text */
-    hyphens: auto; /* Add hyphens for better breaking */
-    
-    /* Container constraints */
-    max-width: 100%; /* Ensures it doesn't exceed parent width */
-    width: 100%; /* Take full available width */
-    box-sizing: border-box; /* Include padding in width calculation */
-    overflow: hidden; /* Hide any overflow */
-    
-    /* Typography */
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 15px;
-    line-height: 1.6; /* Better readability */
-    
-    box-shadow: 0 4px 8px rgba(0, 188, 212, 0.15); /* Blueish shadow */
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.15) 0%, rgba(255, 215, 0, 0.1) 100%);
+    border: 1px solid rgba(255, 215, 0, 0.4);
+    padding: 30px;
+    margin: 30px 0;
+    border-radius: 20px;
+    font-weight: 500;
+    color: #fff;
+    font-size: 16px;
+    box-shadow: 0 15px 35px rgba(138, 43, 226, 0.2), inset 0 0 30px rgba(255, 215, 0, 0.1);
+    word-wrap: break-word;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    position: relative;
+    overflow: hidden;
 }
 
-/* Additional fixes for Streamlit containers */
-.stExpander > div:first-child {
-    overflow: hidden; /* Prevent horizontal scroll */
+/* Shimmer Effect on Final Recommendation */
+.final-recommendation::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0) 100%);
+    transform: skewX(-25deg);
+    animation: shimmer 6s infinite;
 }
 
-.element-container {
-    overflow: hidden; /* Prevent horizontal scroll */
+@keyframes shimmer {
+    0% { left: -100%; }
+    20% { left: 200%; }
+    100% { left: 200%; }
 }
 
-/* Fix for any potential inline code or long URLs */
-code, pre {
-    word-wrap: break-word !important;
-    overflow-wrap: break-word !important;
-    white-space: pre-wrap !important;
-    max-width: 100% !important;
+/* Metrics Styling overhaul */
+[data-testid="stMetricValue"] {
+    font-size: 2rem !important;
+    font-weight: 700 !important;
+    background: -webkit-linear-gradient(#fff, #b3b3b3);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 
-/* Agent avatar styling */
-.agent-avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 10px;
-    flex-shrink: 0; /* Prevent avatar from shrinking */
-}
-
-/* Button styling */
+/* Primary Button Styling */
 .stButton>button {
-    background-color: #4CAF50;
-    color: white;
-    padding: 10px 20px;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    padding: 12px 28px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 10px 20px rgba(99, 102, 241, 0.3) !important;
+    text-transform: uppercase;
 }
 
 .stButton>button:hover {
-    background-color: #45a049;
+    transform: translateY(-3px) !important;
+    box-shadow: 0 15px 25px rgba(99, 102, 241, 0.4) !important;
 }
-            
-/* Copy button styling - FIXED */
-.copy-button {
-    background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
-    color: white;
-    border: none;
-    padding: 12px 20px;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    margin: 10px 0;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 4px rgba(0, 123, 255, 0.2);
+
+.stButton>button:active {
+    transform: translateY(1px) !important;
+}
+
+/* Expander Overrides */
+.streamlit-expanderHeader {
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+}
+
+/* Ensure code blocks look premium */
+code, pre {
+    background: #1e1e24 !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    color: #e0e0e0 !important;
+}
+
+/* Agent Avatar Pulsing Animation */
+@keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
+
+.agent-avatar {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    margin-right: 15px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    animation: pulse 2s infinite;
 }
 
-.copy-button:hover {
-    background: linear-gradient(135deg, #0056b3 0%, #004085 100%);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
-}
-
-.copy-button:active {
-    transform: translateY(0);
-}
-
-/* Hide the malformed copy button if it exists */
-button[onclick*="navigator.clipboard.writeText"] {
-    display: none !important;
-}
-
-/* Footer disclaimer styling for better visibility */
+/* Clean up footer disclaimer */
 .footer-disclaimer {
     text-align: center;
-    color: #555 !important; /* Darker color for better visibility */
-    font-size: 0.95em !important; /* Slightly larger font */
-    padding: 20px 15px !important; /* Add padding for better spacing */
-    margin: 20px 0 !important; /* Add top and bottom margin */
-    background-color: #f8f9fa; /* Light background */
-    border-radius: 8px; /* Rounded corners */
-    border: 1px solid #e0e0e0; /* Subtle border */
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Subtle shadow */
+    color: #888 !important;
+    font-size: 0.9rem !important;
+    padding: 24px !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
 .footer-disclaimer .disclaimer-text {
-    color: #dc3545 !important; /* Bootstrap red color for disclaimer */
-    font-weight: bold !important;
-    font-size: 1em !important; /* Same size as parent text */
-    margin-top: 8px !important; /* Space between lines */
-    display: block; /* Make it a block for better spacing */
+    color: #ff5252 !important;
+    font-weight: 600 !important;
+    margin-top: 10px !important;
+    opacity: 0.8;
 }
 
-/* Responsive design improvements */
-@media (max-width: 768px) {
-    .bull-message, .bear-message, .final-recommendation {
-        padding: 15px;
-        margin: 10px 0;
-        font-size: 13px;
-    }
-    
-    .footer-disclaimer {
-        font-size: 0.9em !important;
-        padding: 15px 10px !important;
-    }
+/* Headers */
+h1, h2, h3 {
+    background: -webkit-linear-gradient(45deg, #ffffff, #a8a8a8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700 !important;
 }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -514,118 +502,134 @@ def main():
 
             st.markdown("---") # Visual separator
 
-            # Initialize trading agents with user-defined personalities
-            bull_agent, bear_agent = create_agents(bull_personality, bear_personality)
+            # ===============================================
+            # AGENTIC WORKFLOW POWERED BY CREWAI
+            # ===============================================
+            st.subheader("🤖 Live Agentic Debate")
             
-            st.subheader("🥊 Live Debate")
-            
-            # Progress bar for the debate
-            debate_progress_bar = st.progress(0)
-            
-            # Debate rounds container
-            debate_container = st.container()
-            with debate_container:
-                # Round 1: Initial positions
-                st.session_state.current_round = 1
-                debate_progress_bar.progress(st.session_state.current_round / (max_rounds + 1))
-                with st.expander(f"Round {st.session_state.current_round}: Initial Analysis", expanded=True):
-                    
-                    with st.spinner("Agent Bull is analyzing..."):
-                        bull_initial, bull_sentiment = bull_agent.analyze(stock_data)
-                        time.sleep(0.5)  # Simulate thinking time
-                    
-                    display_message({"name": bull_agent.name, "avatar": bull_agent.avatar, "color": bull_agent.color}, bull_initial, bull_sentiment)
-                    st.session_state.debate_history.append({
-                        "round": st.session_state.current_round,
-                        "agent": bull_agent.name,
-                        "message": bull_initial,
-                        "sentiment": bull_sentiment
-                    })
-                    
-                    with st.spinner("Agent Bear is analyzing..."):
-                        bear_initial, bear_sentiment = bear_agent.analyze(stock_data)
-                        time.sleep(0.5)
-                    
-                    display_message({"name": bear_agent.name, "avatar": bear_agent.avatar, "color": bear_agent.color}, bear_initial, bear_sentiment)
-                    st.session_state.debate_history.append({
-                        "round": st.session_state.current_round,
-                        "agent": bear_agent.name,
-                        "message": bear_initial,
-                        "sentiment": bear_sentiment
-                    })
+            # Setup agent container
+            workflow_container = st.container()
+            with workflow_container:
+                with st.spinner("Initializing CrewAI Agents and Tools..."):
+                    # Create the agents
+                    researcher, bull_agent, bear_agent, judge_agent = crew_agentic_workflow.create_trading_agents(
+                        bull_focus=", ".join(bull_personality.focus_areas),
+                        bear_focus=", ".join(bear_personality.focus_areas),
+                        api_key=openai_key
+                    )
                 
-                # Subsequent rounds: agents counter-argue
-                last_bull_message = bull_initial
-                last_bear_message = bear_initial
+                # We will keep the history in session state
+                st.session_state.debate_history = []
                 
-                for round_num in range(2, max_rounds + 1):
-                    st.session_state.current_round = round_num
-                    debate_progress_bar.progress(st.session_state.current_round / (max_rounds + 1))
-                    with st.expander(f"Round {st.session_state.current_round}: Counter-Arguments", expanded=True):
-                        # Bull responds to Bear
-                        with st.spinner(f"Agent Bull is preparing counter-argument (Round {st.session_state.current_round})..."):
-                            bull_counter, bull_sentiment = bull_agent.respond_to(bear_agent.name, last_bear_message, stock_data)
-                            time.sleep(0.5)
-                        
-                        display_message({"name": bull_agent.name, "avatar": bull_agent.avatar, "color": bull_agent.color}, bull_counter, bull_sentiment)
-                        st.session_state.debate_history.append({
-                            "round": st.session_state.current_round,
-                            "agent": bull_agent.name,
-                            "message": bull_counter,
-                            "sentiment": bull_sentiment
-                        })
-                        
-                        # Bear responds to Bull  
-                        with st.spinner(f"Agent Bear is preparing counter-argument (Round {st.session_state.current_round})..."):
-                            bear_counter, bear_sentiment = bear_agent.respond_to(bull_agent.name, last_bull_message, stock_data)
-                            time.sleep(0.5)
-                        
-                        display_message({"name": bear_agent.name, "avatar": bear_agent.avatar, "color": bear_agent.color}, bear_counter, bear_sentiment)
-                        st.session_state.debate_history.append({
-                            "round": st.session_state.current_round,
-                            "agent": bear_agent.name,
-                            "message": bear_counter,
-                            "sentiment": bear_sentiment
-                        })
-                        
-                        last_bull_message = bull_counter
-                        last_bear_message = bear_counter
+                # --- Step 1: Research ---
+                with st.spinner(f"🕵️ Researcher is gathering comprehensive data for {stock_symbol}..."):
+                    research_task = Task(
+                        description=f"""Use your tools to gather all available technical data, recent news, and Reddit sentiment for the stock {stock_symbol}. 
+                                        Compile this into a comprehensive research report for the analysts.""",
+                        expected_output=f"A detailed dossier containing technical levels, recent news context, and social sentiment for {stock_symbol}.",
+                        agent=researcher
+                    )
+                    Crew(agents=[researcher], tasks=[research_task], verbose=False).kickoff()
+                    research_res = research_task.output.raw
                 
-                debate_progress_bar.progress(1.0) # Complete progress bar
-                st.success("Debate Concluded!")
+                with st.expander("🕵️ Research Phase: Data Gathered", expanded=True):
+                    st.markdown(research_res)
+                    
+                st.session_state.debate_history.append({"round": "Research", "agent": "Market Researcher 🕵️", "message": research_res, "sentiment": "neutral"})
+                
+                last_bull_argument = "No previous arguments."
+                last_bear_argument = "No previous arguments."
+                
+                # --- Step 2: Debate Loop ---
+                for round_num in range(1, max_rounds + 1):
+                    # Bull Turn
+                    bull_desc = f"""
+                        Read this background research:
+                        {research_res}
+                        
+                        The Bear analyst recently argued: {last_bear_argument}
+                        
+                        Construct a highly persuasive 2-3 paragraph argument/rebuttal on why we should BUY or GO LONG on {stock_symbol} today. 
+                        Directly attack weaknesses in the bear argument using the technical and news data.
+                    """
+                    bull_task = Task(description=bull_desc, expected_output="A 2-3 paragraph bullish trading thesis citing data.", agent=bull_agent)
+                    
+                    with st.spinner(f"🐂 Agent Bull is formulating a case (Round {round_num})..."):
+                        Crew(agents=[bull_agent], tasks=[bull_task], verbose=False).kickoff()
+                        bull_res = bull_task.output.raw
+                    
+                    with st.expander(f"🐂 Bullish Analysis - Round {round_num}", expanded=True):
+                        st.markdown(f'<div class="base-message bull-message">{bull_res}</div>', unsafe_allow_html=True)
+                        
+                    st.session_state.debate_history.append({"round": round_num, "agent": "Agent Bull 🐂", "message": bull_res, "sentiment": "bullish"})
+                    last_bull_argument = bull_res
+                    
+                    time.sleep(0.5) # Slight pause for effect
+                    
+                    # Bear Turn
+                    bear_desc = f"""
+                        Read this background research:
+                        {research_res}
+                        
+                        The Bull analyst recently argued: {last_bull_argument}
+                        
+                        Construct a highly persuasive 2-3 paragraph argument/rebuttal on why we should SELL or GO SHORT on {stock_symbol} today. 
+                        Directly attack weaknesses in the bull argument using the technical and news data.
+                    """
+                    bear_task = Task(description=bear_desc, expected_output="A 2-3 paragraph bearish trading thesis citing data.", agent=bear_agent)
+                    
+                    with st.spinner(f"🐻 Agent Bear is formatting a counter-argument (Round {round_num})..."):
+                        Crew(agents=[bear_agent], tasks=[bear_task], verbose=False).kickoff()
+                        bear_res = bear_task.output.raw
+                        
+                    with st.expander(f"🐻 Bearish Counter-Analysis - Round {round_num}", expanded=True):
+                        st.markdown(f'<div class="base-message bear-message">{bear_res}</div>', unsafe_allow_html=True)
+                        
+                    st.session_state.debate_history.append({"round": round_num, "agent": "Agent Bear 🐻", "message": bear_res, "sentiment": "bearish"})
+                    last_bear_argument = bear_res
+                    
+                    time.sleep(0.5)
+                
+                # --- Step 3: Judge Verdict ---
+                judge_desc = f"""
+                    Review the full research report for {stock_symbol}:
+                    {research_res}
+                    
+                    The Final Bull argument is: {last_bull_argument}
+                    The Final Bear argument is: {last_bear_argument}
+                    
+                    Deliver a final recommendation formatted strictly in markdown with:
+                    - **Decision**: BUY / SELL / HOLD
+                    - **Confidence**: 1-10
+                    - **Entry / Target / Stop Loss Levels**
+                    - **Reasoning**: A concise summary of why you chose this path over the alternatives.
+                """
+                judge_task = Task(description=judge_desc, expected_output="A structured markdown trading recommendation with clear levels and reasoning.", agent=judge_agent)
+                
+                with st.spinner("⚖️ Chief Risk Officer is reviewing the debate to render a final verdict..."):
+                    Crew(agents=[judge_agent], tasks=[judge_task], verbose=False).kickoff()
+                    judge_res = judge_task.output.raw
+                    
+                st.session_state.final_recommendation_text = judge_res
 
-                st.markdown("---")
-                st.subheader("⚖️ Debate Summary")
-                with st.spinner("Generating debate summary..."):
-                    # Pass the API key to generate_debate_summary as well if it uses LLM
-                    summary = generate_debate_summary(st.session_state.debate_history, stock_data)
-                    st.markdown(summary)
-                
-                st.markdown("---")
-                st.subheader("🎯 Final Recommendation")
-                
-                with st.spinner("Generating final recommendation..."):
-                    # Pass the API key to generate_final_recommendation as well if it uses LLM
-                    final_rec = generate_final_recommendation(st.session_state.debate_history, stock_data)
-                    st.session_state.final_recommendation_text = final_rec # Store for re-runs
-                
-                st.markdown(f"""
-                <div class="final-recommendation">
-                    {st.session_state.final_recommendation_text}
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Add copy to clipboard button for the recommendation
-                if st.session_state.final_recommendation_text:
-                    # Replace the copy_to_clipboard_button call with this:
-                    if st.button("📋 Copy Recommendation", key="copy_rec"):
-                        # Clean the text for copying
-                        clean_recommendation = st.session_state.final_recommendation_text.replace('−', '-').replace('*', '')
-                        clean_recommendation = ' '.join(clean_recommendation.split())  # Remove extra whitespace
-                        
-                        # Use Streamlit's native approach
-                        st.code(clean_recommendation, language=None)
-                        st.success("💡 Tip: Click the copy icon in the top-right corner of the text box above to copy!")
+            st.success("✨ Agentic Workflow Completed Successfully!")
+
+            st.markdown("---")
+            st.subheader("🎯 Final Recommendation (Chief Risk Officer)")
+            st.markdown(f'''
+            <div class="final-recommendation">
+                <h3>⚖️ Chief Risk Officer Verdict</h3>
+                {st.session_state.final_recommendation_text}
+            </div>
+            ''', unsafe_allow_html=True)
+            
+            # Add copy to clipboard button for the recommendation
+            if st.session_state.final_recommendation_text:
+                if st.button("📋 Copy Recommendation", key="copy_rec"):
+                    clean_recommendation = st.session_state.final_recommendation_text.replace('−', '-').replace('*', '')
+                    clean_recommendation = ' '.join(clean_recommendation.split())
+                    st.code(clean_recommendation, language=None)
+                    st.success("💡 Tip: Click the copy icon in the top-right corner of the text box above to copy!")
 
         # This block handles re-runs of the app if a debate was already active
         elif st.session_state.debate_active and st.session_state.stock_data:
