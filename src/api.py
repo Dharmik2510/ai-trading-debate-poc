@@ -68,12 +68,19 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def _fetch_stock_data(req_symbol: str, reddit_client_id: str, reddit_client_secret: str) -> StockData:
-    fetcher = StockDataFetcher(
-        reddit_client_id=reddit_client_id or None,
-        reddit_client_secret=reddit_client_secret or None,
+def _fetch_stock_data(req_symbol: str, openai_key: str, reddit_client_id: str, reddit_client_secret: str) -> StockData:
+    reddit_credentials = None
+    if reddit_client_id and reddit_client_secret:
+        reddit_credentials = {
+            'client_id': reddit_client_id,
+            'client_secret': reddit_client_secret,
+        }
+    return StockDataFetcher.get_stock_data(
+        req_symbol,
+        period="1y",
+        api_key=openai_key,
+        reddit_credentials=reddit_credentials,
     )
-    return fetcher.get_stock_data(req_symbol)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -85,7 +92,7 @@ def health_check():
 
 @app.post("/api/stock-data")
 def get_stock_data(req: StockDataRequest):
-    stock_data = _fetch_stock_data(req.symbol, req.reddit_client_id, req.reddit_client_secret)
+    stock_data = _fetch_stock_data(req.symbol, req.openai_key, req.reddit_client_id, req.reddit_client_secret)
     return _stock_data_to_dict(stock_data)
 
 
@@ -104,6 +111,7 @@ def stream_debate(req: DebateRequest):
                 None,
                 _fetch_stock_data,
                 req.symbol,
+                req.openai_key,
                 req.reddit_client_id,
                 req.reddit_client_secret,
             )

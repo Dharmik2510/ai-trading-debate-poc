@@ -1,0 +1,24 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# AI & LLM
+openai
+crewai
+langchain-openai
+
+# Stock & Financial Data
+yfinance
+pandas
+
+# Web Scraping
+requests
+beautifulsoup4
+
+# Reddit
+praw
+
+# Streamlit (legacy app)
+streamlit
+plotly
