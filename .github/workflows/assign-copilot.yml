@@ -30,7 +30,7 @@ jobs:
 
             // Node ID for the copilot-swe-agent bot (obtained via GraphQL `user(login:"copilot-swe-agent"){id}`)
             // Update this value if the bot account changes.
-            const copilotBotId = "MDQ6Qm90MTE2MzU4NjA0";
+            const copilotBotId = "U_kgDODB1VSw";
 
             const variables = {
               id: context.payload.issue.node_id,
