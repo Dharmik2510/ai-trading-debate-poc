@@ -1,5 +1,5 @@
 # Web Framework
-fastapi
+fastapi>=0.109.1
 uvicorn[standard]
 python-multipart
 
